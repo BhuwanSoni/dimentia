@@ -1,0 +1,73 @@
+# Dart & Flutter
+.dart_tool/
+.packages
+.pub/
+.pub-cache/
+build/
+coverage/
+lib/generated_plugin_registrant.dart
+.flutter-plugins
+.flutter-plugins-dependencies
+.fvm/flutter_sdk
+
+# Android
+android/.gradle/
+android/key.properties
+android/local.properties
+android/captures/
+**/android/**/gradle-wrapper.jar
+**/android/**/GeneratedPluginRegistrant.java
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# iOS
+ios/.generated/
+ios/Flutter/.last_build_id
+ios/Flutter/App.framework
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/Generated.xcconfig
+ios/Flutter/app.flx
+ios/Flutter/app.zip
+ios/Flutter/flutter_assets/
+ios/Flutter/flutter_export_environment.sh
+ios/ServiceDefinitions.json
+ios/Runner/GeneratedPluginRegistrant.*
+
+# Xcode
+**/*.xcuserstate
+**/*.xcworkspace
+**/*.xcodeproj
+**/*.pbxuser
+**/*.mode1v3
+**/*.mode2v3
+**/*.perspectivev3
+**/*.moved-aside
+**/*sync/
+**/.sconsign.dblite
+**/.tags*
+**/.vagrant/
+**/DerivedData/
+**/profile
+**/xcuserdata
+
+# macOS & IDEs
+.DS_Store
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code (optional)
+.vscode/
+
+# Misc
+*.log
+*.pyc
+*.class
+*.swp
+.history
+.migrate_working_dir/
+buildlog/
+.atom/
