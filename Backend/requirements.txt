@@ -7,4 +7,6 @@ google-cloud-firestore
 firebase-admin
 groq
 joblib
-numpy
+numpy 
+xgboost
+python-dateutil
