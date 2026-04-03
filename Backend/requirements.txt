@@ -3,10 +3,14 @@ flask-cors
 gunicorn
 requests
 python-dotenv
-google-cloud-firestore
 firebase-admin
+google-cloud-firestore
 groq
-joblib
-numpy 
 xgboost
+numpy
+joblib
 python-dateutil
+pytz
+tzlocal
+apscheduler
+protobuf
