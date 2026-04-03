@@ -1,0 +1,61 @@
+# =========================
+# FLUTTER
+# =========================
+build/
+.gradle/
+.dart_tool/
+.packages
+.flutter-plugins-dependencies
+.flutter-plugins
+.metadata
+.idea/
+.vscode/
+
+android/.gradle/
+android/local.properties
+android/app/build/
+
+# =========================
+# PYTHON BACKEND
+# =========================
+__pycache__/
+*.pyc
+venv/
+.env/
+
+# =========================
+# SECRETS
+# =========================
+firebase_key.json
+Backend/firebase_key.json
+.env
+
+# =========================
+# DATA & ML
+# =========================
+*.csv
+*.xlsx
+*.ipynb
+
+# =========================
+# AUDIO
+# =========================
+*.mp3
+
+# =========================
+# LARGE MODELS
+# =========================
+*.gguf
+*.whl
+
+# =========================
+# LOGS
+# =========================
+*.log
+firebase-debug.log
+
+# =========================
+# SYSTEM
+# =========================
+.DS_Store
+Thumbs.db

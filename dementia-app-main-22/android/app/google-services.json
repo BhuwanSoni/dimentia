@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "912947904148",
+    "firebase_url": "https://ai-app-9a0cd-default-rtdb.firebaseio.com",
+    "project_id": "ai-app-9a0cd",
+    "storage_bucket": "ai-app-9a0cd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:912947904148:android:3035ee7a2b2cf46b283e81",
+        "android_client_info": {
+          "package_name": "com.dimentia.memoir"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDExn55Wt6ICrem7geJH0CIBVX03FGMKlE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
