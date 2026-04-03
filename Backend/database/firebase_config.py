@@ -1,29 +1,30 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
 import os
+import json
 
-# Global Firestore instance
 _db = None
 
 
 def initialize_firebase():
-    """
-    Initialize Firebase Admin SDK.
-    Prevents multiple initializations.
-    """
-
     global _db
 
     if not firebase_admin._apps:
         try:
-            # Path to your firebase key
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            cred_path = os.path.join(base_dir, "firebase_key.json")
+            # 🔥 Get JSON from environment variable
+            firebase_json = os.getenv("FIREBASE_KEY")
 
-            cred = credentials.Certificate(cred_path)
+            if not firebase_json:
+                raise Exception("FIREBASE_KEY not found in environment")
+
+            # 🔥 Convert string → dict
+            cred_dict = json.loads(firebase_json)
+
+            # 🔥 Initialize Firebase
+            cred = credentials.Certificate(cred_dict)
             firebase_admin.initialize_app(cred)
 
-            print("✅ Firebase initialized successfully.")
+            print("✅ Firebase initialized from ENV")
 
         except Exception as e:
             print("❌ Firebase initialization failed:", e)
@@ -34,11 +35,6 @@ def initialize_firebase():
 
 
 def get_firestore_client():
-    """
-    Returns Firestore client.
-    Automatically initializes if not already done.
-    """
-
     global _db
 
     if _db is None:
