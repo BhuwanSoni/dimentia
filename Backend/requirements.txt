@@ -6,3 +6,4 @@ python-dotenv
 google-cloud-firestore
 firebase-admin
 groq
+joblib
