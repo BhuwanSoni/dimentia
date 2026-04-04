@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -87,6 +88,9 @@ class ReminderPage extends StatefulWidget {
  
 class _ReminderPageState extends State<ReminderPage> {
   final firestore = FirestoreService();
+
+  // 🔥 Track already-scheduled doc IDs so we don't double-schedule
+  final Set<String> _scheduledIds = {};
  
   // ─── BUG FIX 1 (continued) ─────────────────────────────────────────────────
   // This is the ONLY function that must be used to compute the notification ID,
@@ -97,7 +101,56 @@ class _ReminderPageState extends State<ReminderPage> {
     return docId.hashCode.abs() % 2147483647;
   }
   // ───────────────────────────────────────────────────────────────────────────
- 
+
+  // 🔥 Auto-schedule notifications for chatbot-created reminders
+  StreamSubscription<QuerySnapshot>? _reminderSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _reminderSub = firestore.getReminders().listen((snapshot) async {
+      if (!mounted) return;
+      final userName = SettingsProvider.of(context).username;
+      for (final change in snapshot.docChanges) {
+        if (change.type != DocumentChangeType.added) continue;
+        final docId = change.doc.id;
+        if (_scheduledIds.contains(docId)) continue;
+
+        final data = change.doc.data() as Map<String, dynamic>;
+        final rawTime = data['scheduled_time'] ?? data['time'];
+        if (rawTime == null) continue;
+
+        DateTime scheduledTime;
+        if (rawTime is Timestamp) {
+          scheduledTime = rawTime.toDate().toLocal();
+        } else if (rawTime is String) {
+          final parsed = DateTime.tryParse(rawTime);
+          if (parsed == null) continue;
+          scheduledTime = parsed.isUtc ? parsed.toLocal() : parsed;
+        } else {
+          continue;
+        }
+
+        if (scheduledTime.isBefore(DateTime.now())) continue;
+
+        _scheduledIds.add(docId);
+        final title = data['task'] ?? data['title'] ?? 'Reminder';
+        await NotificationService.scheduleReminder(
+          id: _notificationIdFromDocId(docId),
+          title: title,
+          scheduledTime: scheduledTime,
+          userName: userName,
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _reminderSub?.cancel();
+    super.dispose();
+  }
+
   String _dayLabel(DateTime time) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -595,9 +648,17 @@ class _ReminderPageState extends State<ReminderPage> {
  
             DateTime parsedTime;
             if (rawTime is Timestamp) {
+              // Firestore Timestamp → always local
               parsedTime = rawTime.toDate().toLocal();
             } else if (rawTime is String) {
-              parsedTime = DateTime.tryParse(rawTime) ?? DateTime.now();
+              // Backend saves UTC ISO string e.g. "2026-04-04T14:30:00Z"
+              // DateTime.tryParse keeps it as UTC — must call .toLocal()
+              final parsed = DateTime.tryParse(rawTime);
+              if (parsed != null) {
+                parsedTime = parsed.isUtc ? parsed.toLocal() : parsed;
+              } else {
+                parsedTime = DateTime.now();
+              }
             } else {
               parsedTime = DateTime.now();
             }

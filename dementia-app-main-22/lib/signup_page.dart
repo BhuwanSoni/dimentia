@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'login_page.dart';
 import 'settings_provider.dart'; // 🔥 ADDED
 import 'l10n/app_localizations.dart'; // 🔥 ADDED
@@ -37,6 +38,12 @@ class _SignupPageState extends State<SignupPage> {
 
       await userCredential.user!.updateDisplayName(nameController.text.trim());
       await userCredential.user!.reload();
+
+      // 🔥 Save name to Firestore immediately so it loads on next login
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userCredential.user!.uid)
+          .set({'username': nameController.text.trim()}, SetOptions(merge: true));
 
       if (!mounted) return;
 

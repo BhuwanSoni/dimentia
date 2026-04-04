@@ -134,25 +134,56 @@ class MyApp extends StatelessWidget {
             ),
             themeMode: ThemeMode.light,
 
-            home: StreamBuilder<User?>(
-              stream: FirebaseAuth.instance.authStateChanges(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Scaffold(
-                    body: Center(child: CircularProgressIndicator()),
-                  );
-                }
-
-                if (snapshot.hasData) {
-                  return const HomePage();
-                }
-
-                return const LoginPage();
-              },
-            ),
+            home: _AuthGate(),
           );
         },
       ),
+    );
+  }
+}
+
+// 🔥 Separate StatefulWidget so reload only fires when auth state CHANGES
+// — not on every parent rebuild, which caused flickering.
+class _AuthGate extends StatefulWidget {
+  @override
+  State<_AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<_AuthGate> {
+  String? _previousUid; // track who was logged in before
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final user = snapshot.data;
+        final currentUid = user?.uid;
+
+        // Only act when the uid actually changes (login / logout event)
+        if (currentUid != _previousUid) {
+          _previousUid = currentUid;
+
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            final settings = SettingsProvider.of(context);
+            if (currentUid != null) {
+              settings.reloadAfterLogin();  // new user logged in
+            } else {
+              settings.resetUserData();     // user logged out
+            }
+          });
+        }
+
+        if (user != null) return const HomePage();
+        return const LoginPage();
+      },
     );
   }
 }

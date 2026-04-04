@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class _SettingsInherited extends InheritedWidget {
   const _SettingsInherited({
@@ -42,7 +44,7 @@ class SettingsProviderState extends State<SettingsProvider> {
   bool _isHighContrast = false;
 
   /// ===== USER DATA =====
-  String _username = 'User';
+  String _username = '';
   String _emergencyContact = '';
   String _gender = '';
   String _address = '';
@@ -92,27 +94,100 @@ class SettingsProviderState extends State<SettingsProvider> {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
 
+    // Load non-user preferences from SharedPreferences first
     setState(() {
       _languageCode = prefs.getString('language_code') ?? 'en';
       _locale = Locale(_languageCode);
-
       _isReminderSoundEnabled = prefs.getBool('reminder_sound_enabled') ?? true;
       _isVibrationEnabled = prefs.getBool('vibration_enabled') ?? true;
       _isDarkMode = prefs.getBool('dark_mode') ?? false;
       _isHighContrast = prefs.getBool('high_contrast') ?? false;
-
-      _username = prefs.getString('username') ?? 'User';
-      _emergencyContact = prefs.getString('emergency_contact') ?? '';
-      _gender = prefs.getString('gender') ?? '';
-      _address = prefs.getString('address') ?? '';
-
-      final birthMillis = prefs.getInt('birthdate');
-      _birthdate = birthMillis != null
-          ? DateTime.fromMillisecondsSinceEpoch(birthMillis)
-          : null;
-
       _fontSizeMultiplier = prefs.getDouble('font_size') ?? 1.0;
     });
+
+    // 🔥 Always load user data fresh from Firestore on every login
+    await _loadUserFromFirestore();
+  }
+
+  /// 🔥 Load user profile from Firestore (always fresh, no stale cache)
+  Future<void> _loadUserFromFirestore() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      final data = doc.data();
+
+      // Try Firestore first, fall back to Firebase Auth displayName
+      final firestoreName = data?['username'] as String?;
+      final authName = user.displayName;
+      final resolvedName = (firestoreName != null && firestoreName.trim().isNotEmpty)
+          ? firestoreName.trim()
+          : (authName != null && authName.trim().isNotEmpty)
+              ? authName.trim()
+              : '';
+
+      final prefs = await SharedPreferences.getInstance();
+
+      setState(() {
+        _username = resolvedName;
+        _emergencyContact = data?['emergency_contact'] as String? ?? prefs.getString('emergency_contact') ?? '';
+        _gender = data?['gender'] as String? ?? prefs.getString('gender') ?? '';
+        _address = data?['address'] as String? ?? prefs.getString('address') ?? '';
+
+        final birthMillis = data?['birthdate'] as int? ?? prefs.getInt('birthdate');
+        _birthdate = birthMillis != null
+            ? DateTime.fromMillisecondsSinceEpoch(birthMillis)
+            : null;
+      });
+
+      // Cache the resolved name locally for offline use
+      if (resolvedName.isNotEmpty) {
+        await prefs.setString('username', resolvedName);
+      }
+    } catch (e) {
+      // Firestore failed — fall back to SharedPreferences cache
+      debugPrint('Firestore load failed, using cache: $e');
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _username = prefs.getString('username') ?? '';
+        _emergencyContact = prefs.getString('emergency_contact') ?? '';
+        _gender = prefs.getString('gender') ?? '';
+        _address = prefs.getString('address') ?? '';
+
+        final birthMillis = prefs.getInt('birthdate');
+        _birthdate = birthMillis != null
+            ? DateTime.fromMillisecondsSinceEpoch(birthMillis)
+            : null;
+      });
+    }
+  }
+
+  /// 🔥 Call this on logout to wipe stale user data
+  Future<void> resetUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('username');
+    await prefs.remove('emergency_contact');
+    await prefs.remove('gender');
+    await prefs.remove('address');
+    await prefs.remove('birthdate');
+
+    setState(() {
+      _username = '';
+      _emergencyContact = '';
+      _gender = '';
+      _address = '';
+      _birthdate = null;
+    });
+  }
+
+  /// 🔥 Call this after login to reload fresh data
+  Future<void> reloadAfterLogin() async {
+    await _loadUserFromFirestore();
   }
 
   /// ===== LANGUAGE (🔥 MAIN FIX) =====
@@ -163,6 +238,19 @@ class SettingsProviderState extends State<SettingsProvider> {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('username', trimmed);
+
+    // 🔥 Also save to Firestore so it persists across devices/logins
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .set({'username': trimmed}, SetOptions(merge: true));
+      }
+    } catch (e) {
+      debugPrint('Failed to save username to Firestore: $e');
+    }
 
     setState(() => _username = trimmed);
   }
