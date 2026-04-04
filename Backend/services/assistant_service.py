@@ -6,6 +6,7 @@ import numpy as np
 from datetime import datetime, timedelta, timezone
 from dateutil import parser as date_parser
 import tzlocal
+import pytz
 
 from database.firebase_config import get_firestore_client
 from google.cloud import firestore
@@ -258,19 +259,22 @@ def parse_natural_reminder(user_message):
     else:
         date = now
 
-    # 🕐 Combine date + time
+    # 🕐 Combine date + time (always IST-aware so Render UTC server doesn't shift it)
+    IST = pytz.timezone("Asia/Kolkata")
     hour   = max(0, min(23, hour))
     minute = max(0, min(59, minute))
 
     try:
-        reminder_time = datetime(date.year, date.month, date.day, hour, minute)
+        # Build naive first, then localize to IST — never treat as UTC
+        naive_time    = datetime(date.year, date.month, date.day, hour, minute)
+        reminder_time = IST.localize(naive_time)          # ✅ IST-aware
     except (ValueError, OverflowError):
-        reminder_time = (now.replace(tzinfo=None) + timedelta(hours=1)).replace(
-            second=0, microsecond=0
+        reminder_time = IST.localize(
+            (now.replace(tzinfo=None) + timedelta(hours=1)).replace(second=0, microsecond=0)
         )
 
-    now_naive = now.replace(tzinfo=None)
-    if reminder_time < now_naive:
+    now_ist = datetime.now(IST)
+    if reminder_time < now_ist:
         if has_specific_date:
             reminder_time = reminder_time.replace(year=now.year + 1)
         else:
@@ -294,19 +298,20 @@ def parse_natural_reminder(user_message):
     task = re.sub(r'\b\d{1,2}(st|nd|rd|th)?\b', '', task)
     task = " ".join(task.split()).capitalize()
 
-    # 🕒 Build display string
-    local_time   = reminder_time.replace(tzinfo=local_tz)
-    reminder_day = datetime(reminder_time.year, reminder_time.month, reminder_time.day)
-    today_day    = datetime(now.year, now.month, now.day)
+    # 🕒 Build display string (reminder_time is now IST-aware)
+    ist_time     = reminder_time                          # already IST-aware
+    now_ist      = datetime.now(IST)
+    reminder_day = datetime(ist_time.year, ist_time.month, ist_time.day)
+    today_day    = datetime(now_ist.year, now_ist.month, now_ist.day)
 
     if reminder_day == today_day:
         day_label = "Today"
     elif reminder_day == today_day + timedelta(days=1):
         day_label = "Tomorrow"
     else:
-        day_label = f"{local_time.strftime('%b')} {local_time.day}"
+        day_label = f"{ist_time.strftime('%b')} {ist_time.day}"
 
-    time_label = local_time.strftime("%I:%M %p")
+    time_label = ist_time.strftime("%I:%M %p")
     display    = f"{day_label} • {time_label}"
 
     return {
@@ -557,11 +562,11 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
         create_reminder(
             user_id=user_id,
             task=parsed["task"],
-            time_text=parsed["time"],
+            time_text=parsed["time"],       # ✅ already IST-aware datetime
             time_display=parsed["time_display"],
             source="assistant",
             recurring_type="none",
-            user_timezone=str(tzlocal.get_localzone()),
+            user_timezone="Asia/Kolkata",   # ✅ always IST, never rely on server local
         )
         if lang in ["Hindi", "Hinglish"]:
             reply_text = f"ठीक है, मैं आपको {parsed['time_display']} पर {parsed['task']} की याद दिलाऊंगा।"

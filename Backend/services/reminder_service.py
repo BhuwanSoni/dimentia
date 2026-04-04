@@ -21,14 +21,21 @@ scheduler.start()
 
 
 
-def parse_time_to_utc(time_text, user_timezone="UTC"):
+def parse_time_to_utc(time_text, user_timezone="Asia/Kolkata"):
+    """
+    Convert time_text (datetime or ISO string) to UTC.
+    - If already timezone-aware → convert directly to UTC (no double-localize)
+    - If naive → localize to user_timezone first, then convert to UTC
+    Default timezone is Asia/Kolkata (IST) since Render servers run UTC
+    and we always want to treat user input as IST unless told otherwise.
+    """
     local = pytz.timezone(user_timezone)
 
     if isinstance(time_text, datetime):
-
         if time_text.tzinfo is not None:
+            # ✅ Already aware (e.g. IST-aware from parse_natural_reminder)
             return time_text.astimezone(pytz.utc)
-
+        # Naive datetime → localize to IST then convert
         localized_time = local.localize(time_text)
         return localized_time.astimezone(pytz.utc)
 
