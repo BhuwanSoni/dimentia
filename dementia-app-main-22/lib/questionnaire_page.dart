@@ -96,7 +96,7 @@ class _QuestionnairePageState extends State<QuestionnairePage> {
 
     // ---------------- API CALL ----------------
     final response = await http.post(
-      Uri.parse("http://your-backend-url/predict"),
+      Uri.parse("https://dimentia.onrender.com/predict"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
         "user_id": user.uid,
@@ -110,8 +110,20 @@ class _QuestionnairePageState extends State<QuestionnairePage> {
         }
       }),
     );
+    // 🔍 Always log the raw response for debugging
+    print("📡 Response status: ${response.statusCode}");
+    print("📡 Response body: ${response.body}");
+
+    if (response.statusCode != 200) {
+      throw Exception("Server error (${response.statusCode}): ${response.body}");
+    }
 
     final data = jsonDecode(response.body);
+
+    // 🛡️ Guard: backend may return {"error": "..."} even on 200
+    if (data.containsKey("error")) {
+      throw Exception("Prediction error: ${data["error"]}");
+    }
 
     int percentage = (data["probability"] * 100).toInt();
     String riskLevel = data["risk_level"];
@@ -155,9 +167,12 @@ class _QuestionnairePageState extends State<QuestionnairePage> {
 
     Navigator.pop(context);
 
+    print("❌ Error: $e");
+
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Unable to connect to server"),
+      SnackBar(
+        content: Text("Error: $e"),
+        duration: const Duration(seconds: 5),
       ),
     );
   }
