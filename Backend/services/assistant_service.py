@@ -44,7 +44,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL   = "llama-3.3-70b-versatile"
 
-from services.assistant_service import validate_groq_key
+
 def validate_groq_key():
     """Call at app startup to catch missing API key early."""
     if not GROQ_API_KEY:
