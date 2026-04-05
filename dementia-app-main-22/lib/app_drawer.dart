@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'about_page.dart';      // ✅ ADDED
+import 'about_page.dart';
 import 'chatbot.dart';
 import 'reminders.dart';
 import 'settings.dart';
@@ -18,9 +18,7 @@ class _AppDrawerState extends State<AppDrawer> {
   int _selectedIndex = 0;
 
   void _onItemTapped(int index, VoidCallback navigate) {
-    setState(() {
-      _selectedIndex = index;
-    });
+    setState(() => _selectedIndex = index);
     Navigator.pop(context);
     Future.delayed(const Duration(milliseconds: 200), navigate);
   }
@@ -30,29 +28,11 @@ class _AppDrawerState extends State<AppDrawer> {
     await FirebaseAuth.instance.signOut();
   }
 
-  void _increaseFont() {
-    final settings = SettingsProvider.of(context);
-    if (settings.fontSizeMultiplier < 1.6) {
-      settings.updateFontSize(
-        (settings.fontSizeMultiplier + 0.1).clamp(0.8, 1.6),
-      );
-    }
-  }
-
-  void _decreaseFont() {
-    final settings = SettingsProvider.of(context);
-    if (settings.fontSizeMultiplier > 0.8) {
-      settings.updateFontSize(
-        (settings.fontSizeMultiplier - 0.1).clamp(0.8, 1.6),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
+    final user     = FirebaseAuth.instance.currentUser;
     final settings = SettingsProvider.of(context);
-    final l = AppLocalizations.of(context)!;
+    final l        = AppLocalizations.of(context)!;
 
     return Drawer(
       child: Column(
@@ -62,7 +42,8 @@ class _AppDrawerState extends State<AppDrawer> {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
-                // ── Home ───────────────────────────────────────────────────
+
+                // ── Home ─────────────────────────────────────────────────
                 _buildDrawerItem(
                   icon: Icons.home_rounded,
                   text: l.home,
@@ -70,71 +51,104 @@ class _AppDrawerState extends State<AppDrawer> {
                   onTap: () {},
                 ),
 
-                // ── Reminders ──────────────────────────────────────────────
+                // ── Reminders ────────────────────────────────────────────
                 _buildDrawerItem(
                   icon: Icons.notifications_active_rounded,
                   text: l.reminders,
                   index: 1,
                   onTap: () => Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => const ReminderPage(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const ReminderPage()),
                   ),
                 ),
 
-                // ── Chat Buddy ─────────────────────────────────────────────
+                // ── Chat Buddy ───────────────────────────────────────────
                 _buildDrawerItem(
                   icon: Icons.chat_bubble_rounded,
                   text: l.chatBuddy,
                   index: 2,
                   onTap: () => Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => const ChatScreen(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const ChatScreen()),
                   ),
                 ),
 
                 const Divider(),
 
-                // ── Adjust Text Size ───────────────────────────────────────
+                // ── Adjust Text Size (slider) ─────────────────────────────
                 Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        l.adjustTextSize,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF004D40),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
+                      // Label row with live percentage
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          IconButton(
-                            onPressed: _decreaseFont,
-                            icon: const Icon(Icons.remove_circle_outline),
-                            color: const Color(0xFF2D6A4F),
-                            iconSize: 30,
-                          ),
                           Text(
-                            "${(settings.fontSizeMultiplier * 100).toStringAsFixed(0)}%",
+                            l.adjustTextSize,
                             style: const TextStyle(
-                              fontSize: 16,
                               fontWeight: FontWeight.bold,
+                              color: Color(0xFF004D40),
                             ),
                           ),
-                          IconButton(
-                            onPressed: _increaseFont,
-                            icon: const Icon(Icons.add_circle_outline),
-                            color: const Color(0xFF2D6A4F),
-                            iconSize: 30,
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2D6A4F).withOpacity(0.10),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              "${(settings.fontSizeMultiplier * 100).toStringAsFixed(0)}%",
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF2D6A4F),
+                              ),
+                            ),
                           ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 6),
+
+                      // Small / Large end-labels
+                      Row(
+                        children: [
+                          const Text("A",
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF78909C))),
+                          Expanded(
+                            child: SliderTheme(
+                              data: SliderTheme.of(context).copyWith(
+                                activeTrackColor: const Color(0xFF2D6A4F),
+                                inactiveTrackColor:
+                                    const Color(0xFF2D6A4F).withOpacity(0.20),
+                                thumbColor: const Color(0xFF2D6A4F),
+                                overlayColor:
+                                    const Color(0xFF2D6A4F).withOpacity(0.12),
+                                trackHeight: 4,
+                                thumbShape: const RoundSliderThumbShape(
+                                    enabledThumbRadius: 8),
+                              ),
+                              child: Slider(
+                                value: settings.fontSizeMultiplier,
+                                min: 0.8,
+                                max: 1.6,
+                                divisions: 8,   // steps: 0.8 0.9 1.0 … 1.6
+                                onChanged: (v) =>
+                                    settings.updateFontSize(v),
+                              ),
+                            ),
+                          ),
+                          const Text("A",
+                              style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF78909C))),
                         ],
                       ),
                     ],
@@ -143,30 +157,25 @@ class _AppDrawerState extends State<AppDrawer> {
 
                 const Divider(),
 
-                // ── Settings ───────────────────────────────────────────────
+                // ── Settings ─────────────────────────────────────────────
                 _buildDrawerItem(
                   icon: Icons.settings_rounded,
                   text: l.settings,
                   index: 3,
                   onTap: () => Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => const SettingsPage(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const SettingsPage()),
                   ),
                 ),
 
-                // ── About ──────────────────────────────────────────────────
-                // ✅ ADDED: opens AboutPage — shows all features + usage tips.
+                // ── About ────────────────────────────────────────────────
                 _buildDrawerItem(
                   icon: Icons.info_outline_rounded,
-                  text: 'About',          // swap for l.about if you add it to ARB
+                  text: 'About',
                   index: 4,
                   onTap: () => Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => const AboutPage(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const AboutPage()),
                   ),
                 ),
               ],
@@ -175,7 +184,7 @@ class _AppDrawerState extends State<AppDrawer> {
 
           const Divider(),
 
-          // ── Logout ─────────────────────────────────────────────────────
+          // ── Logout ───────────────────────────────────────────────────
           ListTile(
             leading: const Icon(Icons.logout_rounded),
             title: Text(l.logout),
@@ -188,17 +197,14 @@ class _AppDrawerState extends State<AppDrawer> {
     );
   }
 
-  // ── Drawer header ──────────────────────────────────────────────────────────
+  // ── Drawer header ─────────────────────────────────────────────────────────
   Widget _buildDrawerHeader(User? user, AppLocalizations l) {
     final String name = user?.displayName ?? "User";
 
     return UserAccountsDrawerHeader(
       accountName: Text(
         name,
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-          fontSize: 18,
-        ),
+        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
       ),
       accountEmail: const Text(""),
       currentAccountPicture: CircleAvatar(
@@ -222,7 +228,7 @@ class _AppDrawerState extends State<AppDrawer> {
     );
   }
 
-  // ── Item builder ───────────────────────────────────────────────────────────
+  // ── Item builder ─────────────────────────────────────────────────────────
   Widget _buildDrawerItem({
     required IconData icon,
     required String text,

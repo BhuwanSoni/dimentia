@@ -629,7 +629,7 @@ class _QuestionnairePageState extends State<QuestionnairePage>
                   Expanded(
                     child: _fieldCard(
                       controller: eduYearsController,
-                      label: "Edu. Years",
+                      label: "Educational Years",
                       icon: Icons.school_outlined,
                       type: TextInputType.number,
                     ),

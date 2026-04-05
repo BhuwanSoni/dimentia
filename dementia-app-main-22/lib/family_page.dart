@@ -34,27 +34,6 @@ class FamilyPage extends StatefulWidget {
 
 class _FamilyPageState extends State<FamilyPage> {
   final List<FamilyMember> _family = [
-    FamilyMember(
-      name: 'Rohan',
-      relation: 'Son',
-      phoneNumber: '+91 98765 43210',
-      imagePath: '',
-      color: const Color(0xFFE0F2F1),
-    ),
-    FamilyMember(
-      name: 'Priya',
-      relation: 'Granddaughter',
-      phoneNumber: '+91 91234 56789',
-      imagePath: 'assets/images/daughter.jpg',
-      color: const Color(0xFFFFF3E0),
-    ),
-    FamilyMember(
-      name: 'Dr. Mehta',
-      relation: 'Doctor',
-      phoneNumber: '+91 11 2345 6789',
-      imagePath: 'assets/images/doctor.jpeg',
-      color: const Color(0xFFE3F2FD),
-    ),
   ];
 
   final PageController _pageController = PageController(viewportFraction: 0.85);
