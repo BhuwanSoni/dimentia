@@ -4,16 +4,16 @@ import 'package:intl/intl.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
- 
+
 import 'settings_provider.dart';
 import 'notification_service.dart';
- 
+
 class Reminder {
   final String id;
   final String title;
   final DateTime time;
   final bool isCompleted;
- 
+
   Reminder({
     required this.id,
     required this.title,
@@ -21,20 +21,17 @@ class Reminder {
     required this.isCompleted,
   });
 }
- 
+
 // ─────────────────────────────────────────────────────────────────────────────
 // FIRESTORE SERVICE
 // ─────────────────────────────────────────────────────────────────────────────
 class FirestoreService {
   final _db = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
- 
+
   String get userId => _auth.currentUser!.uid;
- 
-  // ─── BUG FIX 1 ─────────────────────────────────────────────────────────────
-  // Previously returned Future<void>. We need the DocumentReference back so
-  // that the caller can derive a stable notification ID from docRef.id.
-  // Without this, the schedule and cancel IDs never matched.
+
+  // Returns DocumentReference so caller can derive a stable notification ID.
   Future<DocumentReference> addReminder(String title, DateTime time) async {
     return await _db
         .collection('users')
@@ -46,8 +43,7 @@ class FirestoreService {
       'completed': false,
     });
   }
-  // ───────────────────────────────────────────────────────────────────────────
- 
+
   Stream<QuerySnapshot> getReminders() {
     return _db
         .collection('users')
@@ -56,7 +52,7 @@ class FirestoreService {
         .orderBy('time')
         .snapshots();
   }
- 
+
   Future<void> toggleComplete(String id, bool value) async {
     await _db
         .collection('users')
@@ -65,7 +61,7 @@ class FirestoreService {
         .doc(id)
         .update({'completed': value});
   }
- 
+
   Future<void> deleteReminder(String id) async {
     await _db
         .collection('users')
@@ -75,39 +71,38 @@ class FirestoreService {
         .delete();
   }
 }
- 
+
 // ─────────────────────────────────────────────────────────────────────────────
 // REMINDER PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 class ReminderPage extends StatefulWidget {
   const ReminderPage({super.key});
- 
+
   @override
   State<ReminderPage> createState() => _ReminderPageState();
 }
- 
+
 class _ReminderPageState extends State<ReminderPage> {
   final firestore = FirestoreService();
 
-  // 🔥 Track already-scheduled doc IDs so we don't double-schedule
+  // Track already-scheduled doc IDs so we don't double-schedule
   final Set<String> _scheduledIds = {};
- 
-  // ─── BUG FIX 1 (continued) ─────────────────────────────────────────────────
-  // This is the ONLY function that must be used to compute the notification ID,
-  // for both scheduling and cancelling. Using any other ID source (e.g.,
-  // DateTime.now().millisecondsSinceEpoch) means cancel can never find the
-  // notification that was scheduled.
+
+  // The ONLY function used to compute notification ID — for both scheduling
+  // and cancelling. Using any other source means cancel can never find
+  // the notification that was scheduled.
   int _notificationIdFromDocId(String docId) {
     return docId.hashCode.abs() % 2147483647;
   }
-  // ───────────────────────────────────────────────────────────────────────────
 
-  // 🔥 Auto-schedule notifications for chatbot-created reminders
+  // Auto-schedule notifications for chatbot-created reminders
   StreamSubscription<QuerySnapshot>? _reminderSub;
 
   @override
   void initState() {
     super.initState();
+
+    // Stream listener — catches new reminders added while app is open
     _reminderSub = firestore.getReminders().listen((snapshot) async {
       if (!mounted) return;
       final userName = SettingsProvider.of(context).username;
@@ -143,6 +138,56 @@ class _ReminderPageState extends State<ReminderPage> {
         );
       }
     });
+
+    // ✅ FIX: Reschedule all future reminders on every app start.
+    // The stream above only catches NEW additions. If the app restarts,
+    // all previously scheduled notifications are lost from the OS.
+    // This function restores them from Firestore on every launch.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadAndScheduleExistingReminders();
+    });
+  }
+
+  // ✅ NEW: Load and reschedule all future reminders from Firestore
+  Future<void> _loadAndScheduleExistingReminders() async {
+    final snapshot = await firestore.getReminders().first;
+    if (!mounted) return;
+
+    final userName = SettingsProvider.of(context).username;
+
+    for (final doc in snapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+
+      final rawTime = data['scheduled_time'] ?? data['time'];
+      if (rawTime == null) continue;
+
+      DateTime scheduledTime;
+      if (rawTime is Timestamp) {
+        scheduledTime = rawTime.toDate().toLocal();
+      } else if (rawTime is String) {
+        final parsed = DateTime.tryParse(rawTime);
+        if (parsed == null) continue;
+        scheduledTime = parsed.isUtc ? parsed.toLocal() : parsed;
+      } else {
+        continue;
+      }
+
+      // Skip past reminders — nothing to schedule
+      if (scheduledTime.isBefore(DateTime.now())) continue;
+
+      // Skip ones the stream already scheduled this session
+      if (_scheduledIds.contains(doc.id)) continue;
+
+      _scheduledIds.add(doc.id);
+
+      final title = data['task'] ?? data['title'] ?? 'Reminder';
+      await NotificationService.scheduleReminder(
+        id: _notificationIdFromDocId(doc.id),
+        title: title,
+        scheduledTime: scheduledTime,
+        userName: userName,
+      );
+    }
   }
 
   @override
@@ -156,12 +201,12 @@ class _ReminderPageState extends State<ReminderPage> {
     final today = DateTime(now.year, now.month, now.day);
     final tomorrow = today.add(const Duration(days: 1));
     final reminderDay = DateTime(time.year, time.month, time.day);
- 
+
     if (reminderDay == today) return 'Today';
     if (reminderDay == tomorrow) return 'Tomorrow';
     return DateFormat('MMM d').format(time);
   }
- 
+
   // ───────────────────────────────────────────────────────────────────────────
   // ADD REMINDER DIALOG
   // ───────────────────────────────────────────────────────────────────────────
@@ -169,7 +214,7 @@ class _ReminderPageState extends State<ReminderPage> {
     final titleController = TextEditingController();
     DateTime? pickedDate;
     TimeOfDay? pickedTime;
- 
+
     await showDialog(
       context: context,
       builder: (context) {
@@ -206,9 +251,9 @@ class _ReminderPageState extends State<ReminderPage> {
                       ),
                     ),
                   ),
- 
+
                   const SizedBox(height: 14),
- 
+
                   // Date picker
                   InkWell(
                     onTap: () async {
@@ -258,9 +303,9 @@ class _ReminderPageState extends State<ReminderPage> {
                       ),
                     ),
                   ),
- 
+
                   const SizedBox(height: 14),
- 
+
                   // Time picker
                   InkWell(
                     onTap: () async {
@@ -327,11 +372,11 @@ class _ReminderPageState extends State<ReminderPage> {
                     if (titleController.text.isEmpty || pickedTime == null) {
                       return;
                     }
- 
+
                     final text = titleController.text.trim();
                     final date = pickedDate ?? DateTime.now();
                     final time = pickedTime!;
- 
+
                     DateTime finalDateTime = DateTime(
                       date.year,
                       date.month,
@@ -339,43 +384,26 @@ class _ReminderPageState extends State<ReminderPage> {
                       time.hour,
                       time.minute,
                     );
- 
+
                     // Clamp to future (notification_service also does this,
                     // but we do it here first so Firestore gets the right time)
                     if (finalDateTime.isBefore(DateTime.now())) {
                       finalDateTime =
                           DateTime.now().add(const Duration(seconds: 30));
                     }
- 
-                    // ─── BUG FIX 2 ─────────────────────────────────────────
-                    // Read settings BEFORE Navigator.pop(). After the dialog
-                    // is popped its context is unmounted. Calling
-                    // SettingsProvider.of(context) on an unmounted context
-                    // throws or silently returns stale/null data, causing
-                    // scheduleReminder() to be called with the wrong userName
-                    // or not at all.
+
+                    // Read settings BEFORE Navigator.pop() — after the dialog
+                    // is popped its context is unmounted.
                     final userName = SettingsProvider.of(context).username;
-                    // ───────────────────────────────────────────────────────
- 
+
                     Navigator.pop(context);
- 
-                    // ─── BUG FIX 1 (core fix) ──────────────────────────────
+
                     // Save to Firestore first and capture the DocumentReference.
-                    // The Firestore doc ID is stable across app restarts and
-                    // is the only reliable source for a consistent notif ID.
-                    //
-                    // Previously:
-                    //   await firestore.addReminder(text, finalDateTime);
-                    //   final id = DateTime.now().millisecondsSinceEpoch % 100000;
-                    //     ↑ random timestamp → cancel can never find this ID
-                    //
-                    // Now:
+                    // The doc ID is the only stable source for a consistent notif ID.
                     final docRef =
                         await firestore.addReminder(text, finalDateTime);
                     final notifId = _notificationIdFromDocId(docRef.id);
-                    //     ↑ same hash used in _deleteReminder → IDs always match
-                    // ───────────────────────────────────────────────────────
- 
+
                     await NotificationService.scheduleReminder(
                       id: notifId,
                       title: text,
@@ -393,24 +421,23 @@ class _ReminderPageState extends State<ReminderPage> {
       },
     );
   }
- 
+
   // ───────────────────────────────────────────────────────────────────────────
   // DELETE REMINDER
   // ───────────────────────────────────────────────────────────────────────────
   Future<void> _deleteReminder(Reminder reminder) async {
-    // Uses the same _notificationIdFromDocId() as scheduling — IDs now match.
     await NotificationService.cancelReminder(
       _notificationIdFromDocId(reminder.id),
     );
     await firestore.deleteReminder(reminder.id);
   }
- 
+
   // ───────────────────────────────────────────────────────────────────────────
   // REMINDER CARD
   // ───────────────────────────────────────────────────────────────────────────
   Widget _buildReminderCard(Reminder reminder) {
     final settings = SettingsProvider.of(context);
- 
+
     IconData cardIcon;
     final t = reminder.title.toLowerCase();
     if (t.contains('dawa') ||
@@ -427,14 +454,14 @@ class _ReminderPageState extends State<ReminderPage> {
     } else {
       cardIcon = Icons.notifications_active_rounded;
     }
- 
+
     final bool isOverdue =
         !reminder.isCompleted && reminder.time.isBefore(DateTime.now());
- 
+
     final String dayLabel = _dayLabel(reminder.time);
     final String timeLabel = DateFormat('hh:mm a').format(reminder.time);
     final String fullLabel = '$dayLabel • $timeLabel';
- 
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(16),
@@ -479,9 +506,9 @@ class _ReminderPageState extends State<ReminderPage> {
               size: 24,
             ),
           ),
- 
+
           const SizedBox(width: 14),
- 
+
           // Title + date/time
           Expanded(
             child: Column(
@@ -546,7 +573,7 @@ class _ReminderPageState extends State<ReminderPage> {
               ],
             ),
           ),
- 
+
           // Actions
           Column(
             mainAxisSize: MainAxisSize.min,
@@ -577,14 +604,14 @@ class _ReminderPageState extends State<ReminderPage> {
       ),
     ).animate().fadeIn(duration: 300.ms).slideX(begin: 0.2, duration: 300.ms);
   }
- 
+
   // ───────────────────────────────────────────────────────────────────────────
   // BUILD
   // ───────────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final settings = SettingsProvider.of(context);
- 
+
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F5),
       appBar: AppBar(
@@ -595,8 +622,7 @@ class _ReminderPageState extends State<ReminderPage> {
         backgroundColor: const Color(0xFF2D6A4F),
         iconTheme: const IconThemeData(color: Colors.white),
         elevation: 0,
-        // ─── DEBUG BUTTON ─────────────────────────────────────────────────────
-        // Remove this action after confirming notifications work.
+        // DEBUG BUTTON — remove after confirming notifications work
         actions: [
           IconButton(
             icon: const Icon(Icons.bug_report_outlined),
@@ -606,14 +632,14 @@ class _ReminderPageState extends State<ReminderPage> {
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('Check debug console for pending notifications'),
+                    content: Text(
+                        'Check debug console for pending notifications'),
                   ),
                 );
               }
             },
           ),
         ],
-        // ─────────────────────────────────────────────────────────────────────
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showAddReminderDialog,
@@ -632,11 +658,11 @@ class _ReminderPageState extends State<ReminderPage> {
               child: CircularProgressIndicator(color: Color(0xFF2D6A4F)),
             );
           }
- 
+
           final reminders = snapshot.data!.docs.map((doc) {
             final data = doc.data() as Map<String, dynamic>;
             final rawTime = data['scheduled_time'] ?? data['time'];
- 
+
             if (rawTime == null) {
               return Reminder(
                 id: doc.id,
@@ -645,14 +671,11 @@ class _ReminderPageState extends State<ReminderPage> {
                 isCompleted: data['completed'] ?? false,
               );
             }
- 
+
             DateTime parsedTime;
             if (rawTime is Timestamp) {
-              // Firestore Timestamp → always local
               parsedTime = rawTime.toDate().toLocal();
             } else if (rawTime is String) {
-              // Backend saves UTC ISO string e.g. "2026-04-04T14:30:00Z"
-              // DateTime.tryParse keeps it as UTC — must call .toLocal()
               final parsed = DateTime.tryParse(rawTime);
               if (parsed != null) {
                 parsedTime = parsed.isUtc ? parsed.toLocal() : parsed;
@@ -662,7 +685,7 @@ class _ReminderPageState extends State<ReminderPage> {
             } else {
               parsedTime = DateTime.now();
             }
- 
+
             return Reminder(
               id: doc.id,
               title: data['task'] ?? data['title'] ?? 'No Title',
@@ -670,9 +693,9 @@ class _ReminderPageState extends State<ReminderPage> {
               isCompleted: data['completed'] ?? false,
             );
           }).toList();
- 
+
           reminders.sort((a, b) => a.time.compareTo(b.time));
- 
+
           if (reminders.isEmpty) {
             return Center(
               child: Column(
@@ -701,7 +724,7 @@ class _ReminderPageState extends State<ReminderPage> {
               ),
             );
           }
- 
+
           return ListView.builder(
             padding: const EdgeInsets.only(top: 12, bottom: 100),
             itemCount: reminders.length,

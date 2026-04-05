@@ -32,11 +32,23 @@ class _QuestionnairePageState extends State<QuestionnairePage>
   // ── Profile ──────────────────────────────────────────────
   final TextEditingController ageController      = TextEditingController();
   final TextEditingController eduYearsController = TextEditingController();
-  int gender    = 1;
+
+  // BUG FIX #2 – Gender encoding
+  // The ML model was trained with 0 = Male, 1 = Female.
+  // Default is Male → gender = 0.
+  // Previously the default was gender = 1 (Male), which sent "1" to the
+  // model and was interpreted as Female, flipping every Male result.
+  int gender    = 0; // 0 = Male, 1 = Female
   int ses       = 2;
   int education = 5;
   bool profileCompleted = false;
   bool _ageError = false;
+
+  // BUG FIX #1 – Double-submit guard
+  // Prevents _calculateScore() from being called a second time while the
+  // first API call is still in-flight (which created duplicate Firestore
+  // entries visible in Test History).
+  bool _isSubmitting = false;
 
   // ── Questions ────────────────────────────────────────────
   final List<Map<String, dynamic>> questions = [
@@ -103,8 +115,6 @@ class _QuestionnairePageState extends State<QuestionnairePage>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => DraggableScrollableSheet(
-        // FIX: wrapping in DraggableScrollableSheet prevents the bottom sheet
-        // from overflowing the screen on small devices / when keyboard is open.
         initialChildSize: 0.85,
         minChildSize: 0.5,
         maxChildSize: 0.95,
@@ -141,7 +151,6 @@ class _QuestionnairePageState extends State<QuestionnairePage>
                         color: _kGreen, size: 24),
                   ),
                   const SizedBox(width: 12),
-                  // FIX: Expanded prevents the title from overflowing the Row.
                   const Expanded(
                     child: Text(
                       "How to Fill the Form",
@@ -232,7 +241,7 @@ class _QuestionnairePageState extends State<QuestionnairePage>
       profileCompleted = false;
       ageController.clear();
       eduYearsController.clear();
-      gender    = 1;
+      gender    = 0; // BUG FIX #2 – reset to correct default (0 = Male)
       ses       = 2;
       education = 5;
     });
@@ -249,8 +258,15 @@ class _QuestionnairePageState extends State<QuestionnairePage>
     }
   }
 
-  // ── API call + Firestore save + BOUNCE BACK ───────────────
+  // ── API call + Firestore save ─────────────────────────────
   Future<void> _calculateScore() async {
+    // BUG FIX #1 – Double-submit guard
+    // Without this, tapping "See My Results" twice (or a slow network causing
+    // the user to tap again) fired two API calls, and because the server
+    // also writes to Firestore on each call, every test was stored TWICE.
+    if (_isSubmitting) return;
+    setState(() => _isSubmitting = true);
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -276,23 +292,29 @@ class _QuestionnairePageState extends State<QuestionnairePage>
 
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) { Navigator.pop(context); return; }
+      if (user == null) {
+        if (mounted) Navigator.pop(context);
+        return;
+      }
 
       final int rawScore = answers.reduce((a, b) => a + b);
       final int mmse     = 30 - rawScore;
 
+      // BUG FIX #2 – Gender encoding
+      // gender == 0 means Male, gender == 1 means Female.
+      // This now matches the ML model's training encoding (0=Male, 1=Female).
       final response = await http.post(
         Uri.parse("https://dimentia.onrender.com/predict"),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
           "user_id": user.uid,
           "questionnaire": {
-            "AGE":               int.parse(ageController.text),
-            "GENDER":            gender,
+            "AGE":                int.parse(ageController.text),
+            "GENDER":             gender,   // 0 = Male, 1 = Female
             "YEARS_OF_EDUCATION": int.parse(eduYearsController.text),
-            "SES":               ses,
-            "EDUCATION":         education,
-            "MMSE":              mmse,
+            "SES":                ses,
+            "EDUCATION":          education,
+            "MMSE":               mmse,
           }
         }),
       );
@@ -308,39 +330,35 @@ class _QuestionnairePageState extends State<QuestionnairePage>
 
       final int    percentage = (data["probability"] * 100).toInt();
       final String riskLevel  = data["risk_level"];
-      final String nowIso     = DateTime.now().toIso8601String();
 
+      // BUG FIX #1 – DO NOT write predictions to Firestore here.
+      // The server (prediction_service.py) is now the single writer.
+      // Writing here as well was the root cause of every test appearing
+      // twice in Test History.
+      //
+      // We still update the top-level user document for quick-access fields
+      // (profile info only — no prediction subcollection write).
+      final String nowIso = DateTime.now().toIso8601String();
       final userRef = FirebaseFirestore.instance
           .collection("users")
           .doc(user.uid);
 
       await userRef.set({
-        "AGE":               int.parse(ageController.text),
-        "GENDER":            gender,
+        "AGE":                int.parse(ageController.text),
+        "GENDER":             gender,
         "YEARS_OF_EDUCATION": int.parse(eduYearsController.text),
-        "SES":               ses,
-        "EDUCATION":         education,
-        "MMSE":              mmse,
-        "probability":       data["probability"],
-        "last_test":         nowIso,
+        "SES":                ses,
+        "EDUCATION":          education,
+        "MMSE":               mmse,
+        "probability":        data["probability"],
+        "last_test":          nowIso,
       }, SetOptions(merge: true));
 
-      await userRef.collection("predictions").add({
-        "prediction":   data["prediction"] ?? 1,
-        "probability":  data["probability"],
-        "risk_level":   riskLevel,
-        "timestamp":    nowIso,
-        "questionnaire": {
-          "AGE":               int.parse(ageController.text),
-          "GENDER":            gender,
-          "YEARS_OF_EDUCATION": int.parse(eduYearsController.text),
-          "SES":               ses,
-          "EDUCATION":         education,
-          "MMSE":              mmse,
-        },
-      });
+      // ── REMOVED: userRef.collection("predictions").add({…})
+      // That duplicate write has been deleted. The server already saved
+      // the prediction document inside predict_and_store().
 
-      if (mounted) Navigator.pop(context);
+      if (mounted) Navigator.pop(context); // dismiss loading dialog
 
       if (!mounted) return;
 
@@ -383,6 +401,9 @@ class _QuestionnairePageState extends State<QuestionnairePage>
           ),
         );
       }
+    } finally {
+      // Always release the guard so the user can retry after an error
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -461,7 +482,6 @@ class _QuestionnairePageState extends State<QuestionnairePage>
                         color: Colors.white, size: 20),
                   ),
                 ),
-                // FIX: Expanded prevents title from pushing the info button off screen.
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -555,7 +575,6 @@ class _QuestionnairePageState extends State<QuestionnairePage>
       child: SlideTransition(
         position: _slideAnim,
         child: SingleChildScrollView(
-          // FIX: padding accounts for the FAB so content isn't hidden behind it.
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -564,8 +583,6 @@ class _QuestionnairePageState extends State<QuestionnairePage>
 
               _sectionLabel("PERSONAL DETAILS"),
               const SizedBox(height: 12),
-              // FIX: CrossAxisAlignment.start so the error text under Age
-              // doesn't stretch the Female tile taller.
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -592,8 +609,6 @@ class _QuestionnairePageState extends State<QuestionnairePage>
                                 Icon(Icons.info_outline,
                                     color: Colors.red.shade600, size: 13),
                                 const SizedBox(width: 4),
-                                // FIX: Flexible so the error text wraps instead of
-                                // overflowing on narrow screens.
                                 Flexible(
                                   child: Text(
                                     "Age must be 10 – 120",
@@ -625,20 +640,25 @@ class _QuestionnairePageState extends State<QuestionnairePage>
               const SizedBox(height: 24),
               _sectionLabel("GENDER"),
               const SizedBox(height: 12),
+
+              // BUG FIX #2 – Gender encoding
+              // Male  → gender = 0  (was incorrectly 1)
+              // Female → gender = 1 (was incorrectly 0)
+              // The ML model expects 0=Male, 1=Female (standard OASIS encoding).
               Row(
                 children: [
                   Expanded(child: _selectTile(
-                    selected: gender == 1,
+                    selected: gender == 0,          // FIX: was gender == 1
                     label: "Male",
                     icon: Icons.male_rounded,
-                    onTap: () => setState(() => gender = 1),
+                    onTap: () => setState(() => gender = 0), // FIX: was gender = 1
                   )),
                   const SizedBox(width: 14),
                   Expanded(child: _selectTile(
-                    selected: gender == 0,
+                    selected: gender == 1,          // FIX: was gender == 0
                     label: "Female",
                     icon: Icons.female_rounded,
-                    onTap: () => setState(() => gender = 0),
+                    onTap: () => setState(() => gender = 1), // FIX: was gender = 0
                   )),
                 ],
               ),
@@ -697,8 +717,6 @@ class _QuestionnairePageState extends State<QuestionnairePage>
                             Icon(Icons.error_outline,
                                 color: Colors.white, size: 20),
                             SizedBox(width: 10),
-                            // FIX: Expanded stops the snackbar text from
-                            // overflowing on small screens.
                             Expanded(
                               child: Text(
                                 "Age must be between 10 and 120",
@@ -743,7 +761,7 @@ class _QuestionnairePageState extends State<QuestionnairePage>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
 
-              // Question card — shrinks naturally, never forces overflow.
+              // Question card
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(22),
@@ -779,7 +797,6 @@ class _QuestionnairePageState extends State<QuestionnairePage>
                         color: _kDarkGreen,
                         height: 1.4,
                       ),
-                      // FIX: let long questions wrap rather than overflow.
                       softWrap: true,
                     ),
                   ],
@@ -790,8 +807,6 @@ class _QuestionnairePageState extends State<QuestionnairePage>
               _sectionLabel("SELECT YOUR ANSWER"),
               const SizedBox(height: 12),
 
-              // FIX: Wrap the options + button in a scrollable area so that on
-              // very small screens (or when the keyboard is up) nothing clips.
               Expanded(
                 child: SingleChildScrollView(
                   child: Column(
@@ -841,8 +856,6 @@ class _QuestionnairePageState extends State<QuestionnairePage>
                                       : null,
                                 ),
                                 const SizedBox(width: 16),
-                                // FIX: Expanded prevents long option labels from
-                                // overflowing the row.
                                 Expanded(
                                   child: Text(
                                     opt["label"] as String,
@@ -1071,8 +1084,6 @@ class _QuestionnairePageState extends State<QuestionnairePage>
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // FIX: Flexible so the label never pushes the icon off-screen
-              // on devices with large font scale.
               Flexible(
                 child: Text(
                   label,
@@ -1154,8 +1165,6 @@ class ResultPage extends StatelessWidget {
                     onPressed: () => Navigator.pop(context, false),
                   ),
                   const SizedBox(width: 4),
-                  // FIX: Expanded prevents the header text from overflowing
-                  // when the icon circle is on the right.
                   const Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1279,8 +1288,6 @@ class ResultPage extends StatelessWidget {
                               children: [
                                 Icon(riskIcon, color: riskColor, size: 22),
                                 const SizedBox(width: 10),
-                                // FIX: Flexible so the risk label wraps instead
-                                // of overflowing on narrow screens.
                                 Flexible(
                                   child: Text(
                                     "$riskLevel Risk",
@@ -1332,8 +1339,6 @@ class ResultPage extends StatelessWidget {
                                     color: _kGreen, size: 22),
                               ),
                               const SizedBox(width: 12),
-                              // FIX: Expanded stops "What this means" from
-                              // overflowing if system font size is large.
                               const Expanded(
                                 child: Text(
                                   "What this means",
@@ -1586,8 +1591,6 @@ class _TestHistoryPageState extends State<TestHistoryPage> {
                     onPressed: () => Navigator.maybePop(context),
                   ),
                   const SizedBox(width: 4),
-                  // FIX: Expanded so the title column doesn't push the
-                  // "New Test" button off screen on small devices.
                   const Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1773,8 +1776,6 @@ class _HistoryCard extends StatelessWidget {
               children: [
                 Container(
                   width: 42, height: 42,
-                  // FIX: shrink=false so the icon circle never collapses
-                  // when the row is tight.
                   decoration: BoxDecoration(
                     color: rc.withOpacity(0.15),
                     shape: BoxShape.circle,
@@ -1782,8 +1783,6 @@ class _HistoryCard extends StatelessWidget {
                   child: Icon(ri, color: rc, size: 22),
                 ),
                 const SizedBox(width: 12),
-                // FIX: Expanded lets the title+date column compress instead of
-                // overflowing when the risk badge + delete button are wide.
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1810,8 +1809,6 @@ class _HistoryCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                // FIX: risk badge is now flexible with a maxWidth constraint
-                // so it doesn't push the delete button off screen.
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 110),
                   child: Container(
@@ -1914,6 +1911,7 @@ class _HistoryCard extends StatelessWidget {
                   if (q['GENDER'] != null)
                     _DetailChip(
                         label: "Gender",
+                        // BUG FIX #2 – Display label now matches corrected encoding
                         value: q['GENDER'] == 0 ? "Male" : "Female"),
                 ],
               ),
@@ -1940,8 +1938,6 @@ class _DetailChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.grey.shade200),
       ),
-      // FIX: RichText inside a chip can overflow on very long values.
-      // Wrap in a ConstrainedBox and use softWrap.
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 160),
         child: RichText(
@@ -2013,8 +2009,6 @@ class _EmptyHomePage extends StatelessWidget {
             Expanded(
               child: Center(
                 child: SingleChildScrollView(
-                  // FIX: SingleChildScrollView so the content doesn't clip
-                  // on short screens / landscape orientation.
                   padding: const EdgeInsets.symmetric(horizontal: 36),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -2150,8 +2144,6 @@ class _InfoRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // FIX: fixed-size icon so it never participates in flex
-          // and shifts the text sideways.
           SizedBox(
             width: 24,
             child: Icon(icon,
@@ -2221,8 +2213,6 @@ class _EduTable extends StatelessWidget {
                   horizontal: 14, vertical: 11),
               child: Row(
                 children: [
-                  // FIX: fixed-width pill so the years column never shifts
-                  // when "20+ years" is wider than "0 years".
                   SizedBox(
                     width: 84,
                     child: Container(

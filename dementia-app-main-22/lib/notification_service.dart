@@ -22,9 +22,9 @@ class NotificationService {
   static Future<void> init() async {
     tz_data.initializeTimeZones();
 
-    // ─── BUG FIX 1: Timezone ─────────────────────────────────────────────────
+    // ─── NOTE: Timezone ───────────────────────────────────────────────────────
     // Hard-coding 'Asia/Kolkata' causes wrong fire times if the device is in
-    // a different timezone. Use `flutter_timezone` package instead:
+    // a different timezone. To fix properly, use the `flutter_timezone` package:
     //
     //   pubspec.yaml:
     //     flutter_timezone: ^1.0.8
@@ -71,17 +71,15 @@ class NotificationService {
     // Standard notification permission (Android 13+)
     await androidPlugin?.requestNotificationsPermission();
 
-    // ─── BUG FIX 2: Exact alarm permission (Android 12+) ─────────────────────
-    // Without this, zonedSchedule() silently does nothing on Android 12+.
-    //
-    // You MUST also add this to android/app/src/main/AndroidManifest.xml
-    // inside the <manifest> tag (not inside <application>):
+    // ─── NOTE: Exact alarm permission (Android 12+) ───────────────────────────
+    // Without this, zonedSchedule() with exactAllowWhileIdle silently does
+    // nothing on Android 12+. We now use inexactAllowWhileIdle (see below)
+    // which does NOT require this permission, so this call is optional but
+    // harmless to keep. If you switch back to exact alarms, you MUST also add:
     //
     //   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
     //
-    // This shows a system dialog asking the user to allow exact alarms.
-    // If the user denies it, notifications will not fire — handle this case
-    // by checking canScheduleExactNotifications() and showing a message.
+    // to android/app/src/main/AndroidManifest.xml inside <manifest>.
     await androidPlugin?.requestExactAlarmsPermission();
     // ─────────────────────────────────────────────────────────────────────────
   }
@@ -96,14 +94,11 @@ class NotificationService {
 
     final now = DateTime.now();
 
-    // ─── BUG FIX 3: Minimum future buffer ────────────────────────────────────
-    // 10 seconds is not enough — by the time Firestore write + this call
-    // completes, the time may already be in the past. zonedSchedule() silently
-    // ignores past times. Use 30 seconds minimum.
+    // Minimum future buffer: 30 seconds.
+    // zonedSchedule() silently ignores past times, so clamp here first.
     if (scheduledTime.isBefore(now)) {
       scheduledTime = now.add(const Duration(seconds: 30));
     }
-    // ─────────────────────────────────────────────────────────────────────────
 
     final tzTime = tz.TZDateTime.from(scheduledTime, tz.local);
 
@@ -153,7 +148,12 @@ class NotificationService {
       tzTime,
       const NotificationDetails(android: androidDetails),
       payload: title,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      // ✅ FIX: Changed from exactAllowWhileIdle to inexactAllowWhileIdle.
+      // exactAllowWhileIdle requires SCHEDULE_EXACT_ALARM permission which
+      // many devices deny silently, causing notifications to never fire.
+      // inexactAllowWhileIdle works without that permission and fires reliably
+      // on all Android versions including 12+.
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
     );

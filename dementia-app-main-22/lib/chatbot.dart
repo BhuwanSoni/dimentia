@@ -493,6 +493,7 @@ User Profile:
       backgroundColor: Colors.transparent,
       elevation: 0,
       toolbarHeight: 70,
+      titleSpacing: 0,
       leadingWidth: 60,
       leading: Padding(
         padding: const EdgeInsets.only(left: 16),
@@ -515,7 +516,8 @@ User Profile:
               onTap: _toggleLanguage,
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 250),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                constraints: const BoxConstraints(maxWidth: 80),
                 decoration: BoxDecoration(
                   color: _isHindi
                       ? const Color(0xFF2D6A4F)
@@ -527,14 +529,17 @@ User Profile:
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(_isHindi ? '🇮🇳' : '🇬🇧',
-                        style: const TextStyle(fontSize: 14)),
-                    const SizedBox(width: 4),
-                    Text(
-                      _l.langToggle,
-                      style: TextStyle(
-                        color: _isHindi ? Colors.white : const Color(0xFF2D6A4F),
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
+                        style: const TextStyle(fontSize: 13)),
+                    const SizedBox(width: 3),
+                    Flexible(
+                      child: Text(
+                        _l.langToggle,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: _isHindi ? Colors.white : const Color(0xFF2D6A4F),
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ],
@@ -611,25 +616,32 @@ User Profile:
             ],
           ),
           const SizedBox(width: 12),
-          Builder(builder: (ctx) {
-            final settings = SettingsProvider.of(ctx);
-            final name     = settings.username.isNotEmpty ? settings.username : null;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(_l.appTitle,
+          Flexible(
+            child: Builder(builder: (ctx) {
+              final settings = SettingsProvider.of(ctx);
+              final name     = settings.username.isNotEmpty ? settings.username : null;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _l.appTitle,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                         color: Color(0xFF1F2937),
                         fontWeight: FontWeight.bold,
-                        fontSize: 18)),
-                Text(
-                  name != null ? _l.hereFor(name) : _l.alwaysHere,
-                  style: const TextStyle(
-                      color: Colors.green, fontSize: 12, fontWeight: FontWeight.w500),
-                ),
-              ],
-            );
-          }),
+                        fontSize: 18),
+                  ),
+                  Text(
+                    name != null ? _l.hereFor(name) : _l.alwaysHere,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: Colors.green, fontSize: 12, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              );
+            }),
+          ),
         ],
       ),
     );
@@ -691,13 +703,13 @@ User Profile:
       child: Container(
         margin: const EdgeInsets.only(bottom: 16),
         constraints:
-            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
         child: Column(
           crossAxisAlignment:
               isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: isUser ? const Color(0xFF2D6A4F) : Colors.white,
                 gradient: isUser
@@ -721,15 +733,15 @@ User Profile:
                 text,
                 style: TextStyle(
                     color: isUser ? Colors.white : const Color(0xFF333333),
-                    fontSize: 16 * fontSizeMultiplier,
-                    height: 1.4),
+                    fontSize: (16 * fontSizeMultiplier).clamp(12.0, 22.0),
+                    height: 1.5),
               ),
             ),
             Padding(
               padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
               child: Text(time,
                   style: TextStyle(
-                      fontSize:   11 * fontSizeMultiplier,
+                      fontSize:   (11 * fontSizeMultiplier).clamp(9.0, 14.0),
                       color:      Colors.grey[500],
                       fontWeight: FontWeight.w500)),
             ),
@@ -822,7 +834,9 @@ User Profile:
                 focusNode:    _focusNode,
                 controller:   _controller,
                 onSubmitted:  (_) => _sendMessage(),
-                style:        TextStyle(fontSize: 16 * fontSizeMultiplier),
+                maxLines:     4,
+                minLines:     1,
+                style:        TextStyle(fontSize: (16 * fontSizeMultiplier).clamp(12.0, 20.0)),
                 cursorColor:  const Color(0xFF2D6A4F),
                 decoration: InputDecoration(
                   hintText:  _l.inputHint,
@@ -1169,6 +1183,7 @@ class _PickerTile extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(value,
                       overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                       style: const TextStyle(
                           fontSize: 13,
                           color: Color(0xFF1F2937),

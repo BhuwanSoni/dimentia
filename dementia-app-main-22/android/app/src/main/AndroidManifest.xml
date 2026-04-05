@@ -5,37 +5,27 @@
     <!-- ─── Permissions ──────────────────────────────────────────────────── -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-
-    <!-- Notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- Exact alarms — required for zonedSchedule() on Android 12+ -->
-    <!-- DO NOT add tools:node="remove" here — that was silently disabling
-         all scheduled notifications. SCHEDULE_EXACT_ALARM must be present
-         and NOT removed for flutter_local_notifications to fire on time. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-
-    <!-- Reschedule notifications after device reboot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
-    <!-- Vibration and wake lock for alarm-style notifications -->
-    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
-    <!-- Hardware features -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
 
     <!-- ─── Application ──────────────────────────────────────────────────── -->
+
     <application
         android:name="${applicationName}"
         android:label="Memoir"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
 
-        <!-- Main Activity -->
+        <!-- Main Flutter Activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -52,6 +42,40 @@
             </intent-filter>
         </activity>
 
+        <!-- Emergency lock screen Activity -->
+        <activity
+            android:name=".EmergencyActivity"
+            android:exported="false"
+            android:showOnLockScreen="true"
+            android:turnScreenOn="true"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.AppCompat.NoActionBar"
+            android:launchMode="singleTop" />
+
+        <!-- Emergency background Service -->
+        <service
+            android:name=".EmergencyService"
+            android:exported="false" />
+            <!-- Widget provider -->
+        <receiver
+            android:name=".EmergencyWidget"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/emergency_widget_info" />
+        </receiver>
+    
+        <!-- Tap receiver -->
+        <receiver
+            android:name=".EmergencyWidgetReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.dimentia.memoir.EMERGENCY_TAP" />
+            </intent-filter>
+        </receiver>
         <!-- flutter_local_notifications: fires scheduled notifications -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
@@ -69,14 +93,15 @@
             </intent-filter>
         </receiver>
 
-        <!-- Flutter embedding -->
+        <!-- Flutter embedding version -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
 
     </application>
 
-    <!-- ─── Queries ──────────────────────────────────────────────────────── -->
+    <!-- ─── Queries (package visibility) ─────────────────────────────────── -->
+
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
