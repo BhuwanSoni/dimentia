@@ -13,7 +13,36 @@
           "package_name": "com.dimentia.memoir"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "912947904148-2k9nkoi27qju9ee0b0127l1jnvrdjrqj.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.dimentia.memoir",
+            "certificate_hash": "7853c122acbd2b116ae6727dcca2fc7e53e300ef"
+          }
+        },
+        {
+          "client_id": "912947904148-6c7olal7ph9u7vpp2blnaibu117e9ba3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.dimentia.memoir",
+            "certificate_hash": "755135312f296a6aae3b3af243f196f46bb6bc8e"
+          }
+        },
+        {
+          "client_id": "912947904148-8pg8bq66gekem5pacjev6u6s76jluufb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.dimentia.memoir",
+            "certificate_hash": "457f880f38804fb669a6187821f0e44378e6a426"
+          }
+        },
+        {
+          "client_id": "912947904148-ljkbbs4cucsakjqqfn5ou0qu8b3q1tis.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDExn55Wt6ICrem7geJH0CIBVX03FGMKlE"
@@ -21,7 +50,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "912947904148-ljkbbs4cucsakjqqfn5ou0qu8b3q1tis.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

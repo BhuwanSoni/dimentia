@@ -134,7 +134,7 @@ class MyApp extends StatelessWidget {
             ),
             themeMode: ThemeMode.light,
 
-            home: _AuthGate(),
+            home: const _AuthGate(),
           );
         },
       ),
@@ -142,46 +142,62 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// 🔥 Separate StatefulWidget so reload only fires when auth state CHANGES
-// — not on every parent rebuild, which caused flickering.
+/// ─────────────────────────────────────────────────────────────────────────────
+/// _AuthGate — listens to Firebase auth state and routes to Home or Login.
+///
+/// FIX: _previousUid mutation has been moved OUT of build() into a dedicated
+/// _handleAuthChange() method. Mutating state inside build() is unsafe and was
+/// causing the uid-change detection to misfire — meaning reloadAfterLogin()
+/// never triggered and navigation didn't happen automatically after email login.
+/// ─────────────────────────────────────────────────────────────────────────────
 class _AuthGate extends StatefulWidget {
+  const _AuthGate();
+
   @override
   State<_AuthGate> createState() => _AuthGateState();
 }
 
 class _AuthGateState extends State<_AuthGate> {
-  String? _previousUid; // track who was logged in before
+  String? _previousUid;
+
+  /// Called from the StreamBuilder builder — handles side effects safely
+  /// outside of the build phase via addPostFrameCallback.
+  void _handleAuthChange(User? user) {
+    final currentUid = user?.uid;
+
+    // No change — do nothing
+    if (currentUid == _previousUid) return;
+
+    _previousUid = currentUid;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final settings = SettingsProvider.of(context);
+      if (currentUid != null) {
+        settings.reloadAfterLogin(); // new user logged in
+      } else {
+        settings.resetUserData(); // user logged out
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
+        // Show spinner while Firebase resolves the initial auth state
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
 
-        final user = snapshot.data;
-        final currentUid = user?.uid;
+        // ✅ Side effects handled separately — never mutate state inside build()
+        _handleAuthChange(snapshot.data);
 
-        // Only act when the uid actually changes (login / logout event)
-        if (currentUid != _previousUid) {
-          _previousUid = currentUid;
-
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            final settings = SettingsProvider.of(context);
-            if (currentUid != null) {
-              settings.reloadAfterLogin();  // new user logged in
-            } else {
-              settings.resetUserData();     // user logged out
-            }
-          });
-        }
-
-        if (user != null) return const HomePage();
+        // Route based on auth state
+        if (snapshot.data != null) return const HomePage();
         return const LoginPage();
       },
     );

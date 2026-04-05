@@ -127,6 +127,32 @@ except Exception as e:
 # 🧠 DEMENTIA RISK PREDICTION
 # =========================================================
 
+def get_stored_items(user_id):
+    """
+    Return all object memories for a user as a list of dicts:
+    [{ object_name, identifier, location, confidence }, ...]
+    Used by the Flutter 'Find my item' bottom sheet.
+    """
+    db    = get_firestore_client()
+    docs  = (
+        db.collection("users")
+          .document(user_id)
+          .collection("object_memories")
+          .stream()
+    )
+    items = []
+    for doc in docs:
+        data = doc.to_dict()
+        if data:
+            items.append({
+                "object_name": data.get("object_name") or data.get("identifier", ""),
+                "identifier":  data.get("identifier", ""),
+                "location":    data.get("location", "Unknown"),
+                "confidence":  data.get("confidence", 1),
+            })
+    return items
+
+
 def predict_dementia(questionnaire_data):
     if dementia_model is None:
         return None
@@ -456,30 +482,46 @@ def get_long_term_memory(user_id):
 
 def build_system_prompt(risk_level):
     base = """
-You are Memoir AI, a calm and supportive assistant for elderly users.
+You are Memoir AI — a warm, caring, and patient assistant designed specially to help elderly users with memory support.
+
+Your purpose is to:
+- Help users remember where they placed their belongings.
+- Set and manage reminders for medicines, appointments, and daily tasks.
+- Keep track of important personal memories (family names, routines, etc.).
+- Detect early signs of memory difficulty and gently encourage healthy habits.
+- Be a kind, trustworthy companion that the user can always count on.
+
+Personality:
+- Speak like a caring family member — warm, patient, and encouraging.
+- Never rush the user. Never sound robotic or cold.
+- Use gentle, positive language. Avoid medical jargon.
+- Celebrate small wins (e.g., "Great job taking your medicine on time! 🌟").
+- If the user seems confused or repeats themselves, respond with patience and no judgment.
 
 Rules:
-- Keep responses SHORT.
-- Maximum 2 sentences.
-- Use simple language.
-- Avoid long explanations.
+- Keep responses SHORT and easy to understand.
+- Maximum 2–3 sentences per reply.
+- Use simple, everyday words.
+- Avoid long explanations or lists.
+- End responses with warmth when appropriate (e.g., "Take care! 😊").
 """
     if risk_level == "Medium":
         base += """
-The user may have mild memory difficulties.
-Use simple language.
-Repeat important details gently.
+Memory Support Level: Mild
+- The user may have mild memory difficulties.
+- Gently repeat key details to help them remember.
+- Offer reminders proactively when relevant.
+- Use encouraging words like "No worries, I've got you!" or "That's perfectly fine!".
 """
     elif risk_level == "High":
         base += """
-The user has high dementia risk.
-Use very short sentences.
-Be extremely clear.
-Repeat key information.
-Encourage reminders.
-Be calm and reassuring.
-Encourage daily routines.
-Avoid complex explanations.
+Memory Support Level: High
+- The user has a high risk of dementia. Be extra gentle and clear.
+- Use very short, simple sentences. One idea at a time.
+- Repeat key information calmly if needed.
+- Always reassure: "Don't worry, I'm here to help."
+- Encourage daily routines warmly: "Keeping a routine is wonderful for your mind!"
+- Never make the user feel bad for forgetting. Always be kind and supportive.
 """
     base += """
 Important Rule:
@@ -487,19 +529,18 @@ If there is any contradiction between earlier conversation and the important kno
 always trust the important known facts as the most up-to-date and correct information.
 """
     base += """
-IMPORTANT:
+IMPORTANT — Language Rules:
 Always reply in the SAME language as the user.
 
 - If user writes in Hindi → reply in Hindi
 - If user writes in Hinglish → reply in Hinglish
 - If user writes in English → reply in English
 
-Keep language simple and natural.
-Do NOT translate unless needed.
+Keep language simple and natural. Do NOT translate unless needed.
 """
     base += """
 Personalization Rules:
-- When user says hello/hi, greet them by name warmly. Example: "Hello Bhuwan! How can I help you today?"
+- When user says hello/hi, greet them by name warmly. Example: "Hello Bhuwan! 😊 So lovely to see you! How can I help you today?"
 - Only mention age, location, or gender if the user directly asks about it.
 - NEVER randomly state where the user lives or their age in unrelated responses.
 - NEVER repeat the same sentence twice in one response.
@@ -569,9 +610,9 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
             user_timezone="Asia/Kolkata",   # ✅ always IST, never rely on server local
         )
         if lang in ["Hindi", "Hinglish"]:
-            reply_text = f"ठीक है, मैं आपको {parsed['time_display']} पर {parsed['task']} की याद दिलाऊंगा।"
+            reply_text = f"बिल्कुल! 😊 मैं आपको '{parsed['task']}' के लिए {parsed['time_display']} पर याद दिलाऊंगा। आप निश्चिंत रहें! 💙"
         else:
-            reply_text = f"Okay, I will remind you about {parsed['task']} at {parsed['time_display']}."
+            reply_text = f"Got it! 😊 I'll remind you about '{parsed['task']}' at {parsed['time_display']}. You can count on me!"
         return {"reply": reply_text, "risk_level": risk_level}
 
     # ==========================================================
@@ -630,22 +671,22 @@ User Profile:
             if risk_level == "High" and not get_double_confirm_state(user_id):
                 set_double_confirm_state(user_id, pending_completion)
                 return {
-                    "reply": "Just to make sure — do you really want me to mark this reminder as completed?",
+                    "reply": "Just to make sure — do you really want me to mark this reminder as completed? 😊",
                     "risk_level": risk_level,
                 }
             complete_reminder(user_id, pending_completion)
             clear_pending_completion(user_id)
             clear_double_confirm_state(user_id)
             if risk_level == "High":
-                reply_text = "Good job.\nI have marked it as completed.\nKeeping routines helps your memory."
+                reply_text = "Wonderful job! 🌟 I've marked it as completed. Keeping up with your routines is so good for you — I'm proud of you!"
             else:
-                reply_text = "Okay. I've marked the reminder as completed."
+                reply_text = "Great job! 🌟 I've marked that reminder as completed. Keep it up!"
             return {"reply": reply_text, "risk_level": risk_level}
 
         if user_lower in ["no", "cancel"]:
             clear_pending_completion(user_id)
             clear_double_confirm_state(user_id)
-            return {"reply": "Okay, I will not mark it as completed.", "risk_level": risk_level}
+            return {"reply": "No problem! 😊 I'll leave that reminder as is.", "risk_level": risk_level}
 
         clear_pending_completion(user_id)
         clear_double_confirm_state(user_id)
@@ -663,7 +704,7 @@ User Profile:
             if any(word in r["task"].lower() for word in task_text.split()):
                 set_pending_completion(user_id, r["id"])
                 return {
-                    "reply": f"I found the reminder '{r['task']}'. Do you want me to mark it as completed?",
+                    "reply": f"Great job! 🌟 I found the reminder '{r['task']}'. Would you like me to mark it as completed?",
                     "risk_level": risk_level,
                 }
 
@@ -687,14 +728,14 @@ User Profile:
                     update_object_location(user_id, pending_object, mem["identifier"], new_location)
                     clear_pending_object(user_id)
                     return {
-                        "reply": f"Okay. I've updated the location. Your {mem['identifier']} {pending_object} is now in the {new_location}.",
+                        "reply": f"Got it! 😊 I've updated that for you. Your {mem['identifier']} {pending_object} is now in the {new_location}.",
                         "risk_level": risk_level,
                     }
             mem = object_memories[0]
             update_object_location(user_id, pending_object, mem["identifier"], new_location)
             clear_pending_object(user_id)
             return {
-                "reply": f"Okay. I've updated the location. Your {mem['identifier']} {pending_object} is now in the {new_location}.",
+                "reply": f"Got it! 😊 I've updated that for you. Your {mem['identifier']} {pending_object} is now in the {new_location}.",
                 "risk_level": risk_level,
             }
 
@@ -711,7 +752,7 @@ User Profile:
                 increment_memory_confidence(user_id, mem)
                 clear_pending_object(user_id)
                 return {
-                    "reply": f"Your {mem['identifier']} {pending_object} is in the {mem['location']}.",
+                    "reply": f"Of course! 😊 Your {mem['identifier']} {pending_object} is in the {mem['location']}.",
                     "risk_level": risk_level,
                 }
             for mem in object_memories:
@@ -720,66 +761,96 @@ User Profile:
                     increment_memory_confidence(user_id, mem)
                     clear_pending_object(user_id)
                     return {
-                        "reply": f"Your {identifier} {pending_object} is in the {mem['location']}.",
+                        "reply": f"Found it! 😊 Your {identifier} {pending_object} is in the {mem['location']}.",
                         "risk_level": risk_level,
                     }
 
     # ==========================================================
     # 🔟 Ambiguity Detection
     # ==========================================================
-    match = re.search(r"where is (?:my|the) (.+)", user_lower)
+    match = re.search(r"where is (?:my|the) (.+)|(?:mera|meri|मेरा|मेरी) (.+?) (?:kahan|कहाँ)", user_lower)
 
     if match:
-        object_name     = re.sub(r"[^\w\s]", "", match.group(1)).strip()
+        object_name     = re.sub(r"[^\w\s]", "", match.group(1) or match.group(2) or "").strip()
         object_memories = get_object_memories(user_id, object_name)
 
         if len(object_memories) > 1:
             set_pending_object(user_id, object_name)
-            clarification_message = f"You have multiple {object_name}s:\n"
-            for mem in object_memories:
-                clarification_message += f"- {mem['identifier']} {object_name} is in the {mem['location']}.\n"
-            clarification_message += "Which one are you referring to?"
+            if lang in ["Hindi", "Hinglish"]:
+                clarification_message = f"मुझे आपके कई {object_name} मिले! 😊\n"
+                for mem in object_memories:
+                    clarification_message += f"• आपका {mem['identifier']} {object_name} {mem['location']} में है।\n"
+                clarification_message += "\nआप किसके बारे में जानना चाहते हैं?"
+            else:
+                clarification_message = f"I found a few {object_name}s I'm keeping track of for you! 😊\n"
+                for mem in object_memories:
+                    clarification_message += f"• Your {mem['identifier']} {object_name} is in the {mem['location']}.\n"
+                clarification_message += "\nWhich one were you looking for?"
             return {"reply": clarification_message, "risk_level": risk_level}
 
         elif len(object_memories) == 1:
             mem = object_memories[0]
             increment_memory_confidence(user_id, mem)
+            if lang in ["Hindi", "Hinglish"]:
+                return {
+                    "reply": f"मिल गया! 😊 आपका {mem['identifier']} {object_name} {mem['location']} में है।",
+                    "risk_level": risk_level,
+                }
             return {
-                "reply": f"Your {mem['identifier']} {object_name} is in the {mem['location']}.",
+                "reply": f"Found it! 😊 Your {mem['identifier']} {object_name} is in the {mem['location']}.",
                 "risk_level": risk_level,
             }
         else:
-            if risk_level == "High":
-                reply_text = f"I don't know where your {object_name} is.\nYou can tell me. I will remember."
+            if lang in ["Hindi", "Hinglish"]:
+                reply_text = f"हम्म, मुझे आपके {object_name} की जगह नहीं पता। कोई बात नहीं! बताएं कहाँ है, मैं याद रख लूंगा। 😊"
+            elif risk_level == "High":
+                reply_text = f"Hmm, I don't know where your {object_name} is right now. No worries! Just tell me where it is and I'll remember it for you. 😊"
             else:
-                reply_text = f"I don't have any record of where your {object_name} is. You can tell me and I'll remember it."
+                reply_text = f"I don't have a record of where your {object_name} is, but I'd love to help! Just tell me where it is and I'll keep track of it for you. 😊"
             return {"reply": reply_text, "risk_level": risk_level}
 
     # ==========================================================
     # 📋 LIST REMINDERS
     # ==========================================================
-    if "what reminders" in user_lower or "list reminders" in user_lower:
+    if "what reminders" in user_lower or "list reminders" in user_lower \
+            or "mere reminders" in user_lower or "मेरे रिमाइंडर" in user_message:
         reminders = get_user_reminders(user_id)
         if not reminders:
-            return {"reply": "You don't have any active reminders.", "risk_level": risk_level}
-        reply_text = "Here are your reminders:\n"
+            if lang in ["Hindi", "Hinglish"]:
+                return {"reply": "अभी आपका कोई रिमाइंडर नहीं है। 😊 क्या मैं एक सेट करूं?", "risk_level": risk_level}
+            return {"reply": "You have no active reminders right now. 😊 Would you like to set one?", "risk_level": risk_level}
+        if lang in ["Hindi", "Hinglish"]:
+            reply_text = "आपके आने वाले रिमाइंडर! ⏰\n"
+        else:
+            reply_text = "Here are your upcoming reminders! ⏰\n"
         for r in reminders:
             raw_time     = r.get("time") or r.get("time_text")
             display_time = raw_time.strftime("%I:%M %p") if hasattr(raw_time, "strftime") else str(raw_time)
-            reply_text  += f"- {r['task']} at {display_time}\n"
+            reply_text  += f"• {r['task']} at {display_time}\n"
+        if lang in ["Hindi", "Hinglish"]:
+            reply_text += "\nक्या आप कुछ बदलना चाहते हैं? 😊"
+        else:
+            reply_text += "\nLet me know if you need to change anything! 😊"
         return {"reply": reply_text, "risk_level": risk_level}
 
     # ==========================================================
     # ⏰ NEXT REMINDER
     # ==========================================================
-    if "next reminder" in user_lower:
+    if "next reminder" in user_lower or "अगला रिमाइंडर" in user_message:
         next_reminder = get_next_reminder(user_id)
         if not next_reminder:
-            return {"reply": "You don't have any upcoming reminders.", "risk_level": risk_level}
+            if lang in ["Hindi", "Hinglish"]:
+                return {"reply": "अभी आपका कोई आने वाला रिमाइंडर नहीं है। 😊 क्या मैं एक सेट करूं?", "risk_level": risk_level}
+            return {"reply": "You have no upcoming reminders right now. 😊 Would you like me to set one?", "risk_level": risk_level}
         raw_time     = next_reminder.get("time") or next_reminder.get("time_text")
         display_time = raw_time.strftime("%I:%M %p") if hasattr(raw_time, "strftime") else str(raw_time)
+        if lang in ["Hindi", "Hinglish"]:
+            return {
+                "reply": f"आपका अगला रिमाइंडर '{next_reminder['task']}' का है, {display_time} बजे। मैं आपका ख्याल रखूंगा! 😊",
+                "risk_level": risk_level,
+            }
         return {
-            "reply": f"Your next reminder is {next_reminder['task']} at {display_time}.",
+            "reply": f"Your next reminder is '{next_reminder['task']}' at {display_time}. I've got you covered! 😊",
             "risk_level": risk_level,
         }
 
@@ -794,26 +865,121 @@ User Profile:
         if "last" in task_text:
             deleted = delete_last_reminder(user_id)
             if deleted:
-                return {"reply": "Okay. I've cancelled your last reminder.", "risk_level": risk_level}
+                if lang in ["Hindi", "Hinglish"]:
+                    return {"reply": "हो गया! 😊 आपका आखिरी रिमाइंडर हटा दिया है।", "risk_level": risk_level}
+                return {"reply": "Done! 😊 I've cancelled your last reminder.", "risk_level": risk_level}
         deleted = delete_reminder_by_task(user_id, task_text)
         if deleted:
-            return {"reply": f"Okay. I've removed the reminder for {task_text}.", "risk_level": risk_level}
+            if lang in ["Hindi", "Hinglish"]:
+                return {"reply": f"हो गया! 😊 '{task_text}' का रिमाइंडर हटा दिया है।", "risk_level": risk_level}
+            return {"reply": f"Done! 😊 I've removed the reminder for '{task_text}'.", "risk_level": risk_level}
         else:
-            return {"reply": "I couldn't find that reminder.", "risk_level": risk_level}
+            if lang in ["Hindi", "Hinglish"]:
+                return {"reply": "हम्म, वो रिमाइंडर नहीं मिला। क्या आप नाम जाँच कर फिर से बताएंगे? 😊", "risk_level": risk_level}
+            return {"reply": "Hmm, I couldn't find that reminder. Could you check the name and try again? 😊", "risk_level": risk_level}
 
     # ==========================================================
     # 🗑 CLEAR ALL REMINDERS
     # ==========================================================
-    if "clear all reminders" in user_lower:
+    if "clear all reminders" in user_lower or "सभी रिमाइंडर हटाओ" in user_message:
         clear_all_reminders(user_id)
-        return {"reply": "All your reminders have been cleared.", "risk_level": risk_level}
+        if lang in ["Hindi", "Hinglish"]:
+            return {"reply": "हो गया! 😊 आपके सभी रिमाइंडर हटा दिए हैं।", "risk_level": risk_level}
+        return {"reply": "All done! 😊 All your reminders have been cleared.", "risk_level": risk_level}
+
+    # ==========================================================
+    # ❓ /help COMMAND
+    # ==========================================================
+    if user_lower.strip() in ["/help", "help", "सहायता", "madad"]:
+        if lang in ["Hindi", "Hinglish"]:
+            help_text = (
+                "मैं आपकी इन कामों में मदद कर सकता हूँ! 😊\n\n"
+                "⏰ रिमाइंडर\n"
+                "  • रिमाइंडर सेट करें → 'मुझे 9 बजे दवाई लेनी है याद दिलाना'\n"
+                "  • रिमाइंडर देखें → 'मेरे रिमाइंडर क्या हैं?'\n"
+                "  • अगला रिमाइंडर → 'अगला रिमाइंडर क्या है?'\n"
+                "  • रिमाइंडर हटाएं → 'दवाई का रिमाइंडर हटाओ'\n"
+                "  • सब हटाएं → 'सभी रिमाइंडर हटाओ'\n\n"
+                "📍 चीज़ ढूंढें\n"
+                "  • 'मेरा चश्मा डाइनिंग टेबल पर है'\n"
+                "  • 'मेरा बटुआ कहाँ है?'\n\n"
+                "🧠 यादें\n"
+                "  • परिवार के नाम बताएं → 'मेरी बेटी का नाम प्रिया है'\n"
+                "  • मैं आपकी ज़रूरी बातें याद रखता हूँ!\n\n"
+                "💬 बातचीत\n"
+                "  • जब चाहें बात करें — मैं हमेशा आपके साथ हूँ! 💙\n\n"
+                "मैं हिंदी, इंग्लिश और Hinglish में बात कर सकता हूँ। 🌟"
+            )
+        else:
+            help_text = (
+                "Here's what I can do for you! 😊\n\n"
+                "⏰ Reminders\n"
+                "  • Set a reminder → 'Remind me to take medicine at 9am'\n"
+                "  • In Hindi/Hinglish → 'Mujhe 9 baje dawa leni hai yaad dilana'\n"
+                "  • View reminders → 'What are my reminders?'\n"
+                "  • Next reminder → 'What is my next reminder?'\n"
+                "  • Cancel reminder → 'Cancel reminder to take medicine'\n"
+                "  • Clear all → 'Clear all reminders'\n\n"
+                "📍 Object Finder (Remember where you kept things)\n"
+                "  • 'My glasses are on the dining table'\n"
+                "  • 'Where is my wallet?'\n\n"
+                "🧠 Memory Assistant\n"
+                "  • Tell me family names → 'My daughter's name is Priya'\n"
+                "  • I remember important facts about you!\n\n"
+                "💬 General Chat\n"
+                "  • Talk to me anytime — I am always here for you!\n\n"
+                "I support English, Hindi, and Hinglish. 🌟\n"
+                "Type 'who are you' to learn more about me."
+            )
+        return {"reply": help_text, "risk_level": risk_level}
+
+    # ==========================================================
+    # 🤖 SELF-AWARENESS — What/Who am I?
+    # ==========================================================
+    self_aware_triggers = [
+        "who are you", "what are you", "what can you do",
+        "tell me about yourself", "what is your purpose",
+        "aap kaun ho", "aap kya kar sakte ho", "tumhara kaam kya hai",
+        "kya kar sakte ho", "kya ho tum",
+        "aap kon ho", "memoir kya hai",
+    ]
+    if any(trigger in user_lower for trigger in self_aware_triggers):
+        name = ""
+        if profile_text:
+            name_lines = [l for l in profile_text.splitlines() if "Name:" in l]
+            if name_lines:
+                name = name_lines[0].replace("- Name:", "").strip().split()[0]
+
+        if lang in ["Hindi", "Hinglish"]:
+            about_text = (
+                f"नमस्ते{' ' + name + '!' if name else '!'} मैं Memoir AI हूँ — आपका व्यक्तिगत स्मृति सहायक। 💙\n\n"
+                "मैं इन तरीकों से आपकी मदद करता हूँ:\n\n"
+                "🧠 आपकी रखी चीज़ें याद रखना।\n"
+                "⏰ दवाई, अपॉइंटमेंट और रोज़ के काम के रिमाइंडर सेट करना।\n"
+                "💾 ज़रूरी यादें सुरक्षित रखना — जैसे परिवार के नाम।\n"
+                "🩺 आपकी याददाश्त का ख्याल रखना और सहायता देना।\n"
+                "😊 और सबसे ज़रूरी — हमेशा आपके साथ रहना! 💙\n\n"
+                "सब कुछ देखने के लिए /help टाइप करें। 🌟"
+            )
+        else:
+            about_text = (
+                f"Hi{' ' + name + '!' if name else '!'} I am Memoir AI — your personal memory companion. 💙\n\n"
+                "I was made to help elderly users like you live more comfortably. Here is how I support you:\n\n"
+                "🧠 I help you remember where you kept your belongings.\n"
+                "⏰ I set reminders for medicines, appointments, and daily tasks.\n"
+                "💾 I store important memories — like family names — so you never lose them.\n"
+                "🩺 I keep track of your memory health and gently adapt my support to your needs.\n"
+                "😊 And most importantly — I am always here to chat and support you, anytime!\n\n"
+                "Type /help to see everything you can ask me. 🌟"
+            )
+        return {"reply": about_text, "risk_level": risk_level}
 
     # ==========================================================
     # 🤖 GREETING INTERCEPT
     # ==========================================================
     greetings = [
         "hello", "hi", "hey", "hii", "helo", "hallo",
-        "namaste", "namaskar",
+        "namaste", "namaskar", "नमस्ते", "नमस्कार",
         "good morning", "good evening", "good afternoon", "good night", "howdy",
     ]
     is_greeting = any(
@@ -829,15 +995,34 @@ User Profile:
                 name = name_lines[0].replace("- Name:", "").strip().split()[0]
 
         hour = datetime.now().hour
-        if hour < 12:
-            time_greet = "Good morning"
-        elif hour < 17:
-            time_greet = "Good afternoon"
+        if lang in ["Hindi", "Hinglish"]:
+            if hour < 12:
+                time_greet = "सुप्रभात"
+            elif hour < 17:
+                time_greet = "नमस्ते"
+            else:
+                time_greet = "शुभ संध्या"
+            if name:
+                reply_text = f"{time_greet}, {name}! 😊 आपसे मिलकर बहुत अच्छा लगा! मैं आपकी क्या सेवा कर सकता हूँ? (/help टाइप करें)"
+            else:
+                reply_text = f"{time_greet}! 😊 आपसे मिलकर बहुत अच्छा लगा! मैं आपकी क्या सेवा कर सकता हूँ? (/help टाइप करें)"
         else:
-            time_greet = "Good evening"
-
-        reply_text = f"{time_greet}, {name}! 😊 How can I help you today?" if name \
-                     else f"{time_greet}! 😊 How can I help you today?"
+            if hour < 12:
+                time_greet = "Good morning"
+            elif hour < 17:
+                time_greet = "Good afternoon"
+            else:
+                time_greet = "Good evening"
+            if name:
+                reply_text = (
+                    f"{time_greet}, {name}! 😊 It's so lovely to hear from you! "
+                    f"How can I help you today? (Type /help to see what I can do!)"
+                )
+            else:
+                reply_text = (
+                    f"{time_greet}! 😊 It's wonderful to hear from you! "
+                    f"How can I help you today? (Type /help to see what I can do!)"
+                )
         return {"reply": reply_text, "risk_level": risk_level}
 
     # ==========================================================
@@ -849,7 +1034,16 @@ User Profile:
 
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "system", "content": f"User is speaking in {lang}. Speak like a friendly assistant in that language."},
+        {
+            "role": "system",
+            "content": (
+                f"User is speaking in {lang}. Always reply in the same language.\n"
+                "If Hindi: use natural, warm Hindi (not overly formal). "
+                "If Hinglish: mix Hindi and English naturally as Indian speakers do. "
+                "If English: reply in friendly English. "
+                "Keep the tone caring, like a family member."
+            ),
+        },
     ]
 
     if user_context:
@@ -885,7 +1079,15 @@ User Profile:
     try:
         raw_reply = call_groq(messages, temperature=0.7, max_tokens=256)
     except RuntimeError as e:
-        return {"reply": str(e), "risk_level": risk_level}
+        if lang in ["Hindi", "Hinglish"]:
+            return {
+                "reply": "ओह नहीं, अभी कनेक्शन में थोड़ी दिक्कत है। 😔 कृपया थोड़ी देर बाद फिर कोशिश करें!",
+                "risk_level": risk_level,
+            }
+        return {
+            "reply": f"Oh no, I'm having a little trouble connecting right now. 😔 Please try again in a moment! ({str(e)})",
+            "risk_level": risk_level,
+        }
 
     reply = adapt_response_by_risk(raw_reply, risk_level)
 

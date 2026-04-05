@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'about_page.dart';      // ✅ ADDED
 import 'chatbot.dart';
 import 'reminders.dart';
 import 'settings.dart';
 import 'settings_provider.dart';
-import 'l10n/app_localizations.dart'; // ✅ ADDED
+import 'l10n/app_localizations.dart';
 
 class AppDrawer extends StatefulWidget {
   const AppDrawer({super.key});
@@ -51,7 +52,7 @@ class _AppDrawerState extends State<AppDrawer> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final settings = SettingsProvider.of(context);
-    final l = AppLocalizations.of(context)!; // ✅ LOCALIZATION
+    final l = AppLocalizations.of(context)!;
 
     return Drawer(
       child: Column(
@@ -61,6 +62,7 @@ class _AppDrawerState extends State<AppDrawer> {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
+                // ── Home ───────────────────────────────────────────────────
                 _buildDrawerItem(
                   icon: Icons.home_rounded,
                   text: l.home,
@@ -68,6 +70,7 @@ class _AppDrawerState extends State<AppDrawer> {
                   onTap: () {},
                 ),
 
+                // ── Reminders ──────────────────────────────────────────────
                 _buildDrawerItem(
                   icon: Icons.notifications_active_rounded,
                   text: l.reminders,
@@ -80,6 +83,7 @@ class _AppDrawerState extends State<AppDrawer> {
                   ),
                 ),
 
+                // ── Chat Buddy ─────────────────────────────────────────────
                 _buildDrawerItem(
                   icon: Icons.chat_bubble_rounded,
                   text: l.chatBuddy,
@@ -94,7 +98,7 @@ class _AppDrawerState extends State<AppDrawer> {
 
                 const Divider(),
 
-                /// 🔥 Adjust Text Size
+                // ── Adjust Text Size ───────────────────────────────────────
                 Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -139,6 +143,7 @@ class _AppDrawerState extends State<AppDrawer> {
 
                 const Divider(),
 
+                // ── Settings ───────────────────────────────────────────────
                 _buildDrawerItem(
                   icon: Icons.settings_rounded,
                   text: l.settings,
@@ -150,12 +155,27 @@ class _AppDrawerState extends State<AppDrawer> {
                     ),
                   ),
                 ),
+
+                // ── About ──────────────────────────────────────────────────
+                // ✅ ADDED: opens AboutPage — shows all features + usage tips.
+                _buildDrawerItem(
+                  icon: Icons.info_outline_rounded,
+                  text: 'About',          // swap for l.about if you add it to ARB
+                  index: 4,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const AboutPage(),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
+
           const Divider(),
 
-          /// 🔥 LOGOUT
+          // ── Logout ─────────────────────────────────────────────────────
           ListTile(
             leading: const Icon(Icons.logout_rounded),
             title: Text(l.logout),
@@ -168,6 +188,7 @@ class _AppDrawerState extends State<AppDrawer> {
     );
   }
 
+  // ── Drawer header ──────────────────────────────────────────────────────────
   Widget _buildDrawerHeader(User? user, AppLocalizations l) {
     final String name = user?.displayName ?? "User";
 
@@ -179,7 +200,7 @@ class _AppDrawerState extends State<AppDrawer> {
           fontSize: 18,
         ),
       ),
-      accountEmail: Text(""), // You can localize this if needed
+      accountEmail: const Text(""),
       currentAccountPicture: CircleAvatar(
         backgroundColor: Colors.white,
         child: Text(
@@ -201,6 +222,7 @@ class _AppDrawerState extends State<AppDrawer> {
     );
   }
 
+  // ── Item builder ───────────────────────────────────────────────────────────
   Widget _buildDrawerItem({
     required IconData icon,
     required String text,
