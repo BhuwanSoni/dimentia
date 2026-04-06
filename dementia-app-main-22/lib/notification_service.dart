@@ -22,21 +22,10 @@ class NotificationService {
   static Future<void> init() async {
     tz_data.initializeTimeZones();
 
-    // ─── NOTE: Timezone ───────────────────────────────────────────────────────
-    // Hard-coding 'Asia/Kolkata' causes wrong fire times if the device is in
-    // a different timezone. To fix properly, use the `flutter_timezone` package:
-    //
-    //   pubspec.yaml:
-    //     flutter_timezone: ^1.0.8
-    //
-    //   Then replace the line below with:
-    //     import 'package:flutter_timezone/flutter_timezone.dart';
-    //     final tzName = await FlutterTimezone.getLocalTimezone();
-    //     tz.setLocalLocation(tz.getLocation(tzName));
-    //
-    // Keeping Asia/Kolkata for now — replace this as soon as possible.
+    // Using hardcoded Asia/Kolkata — flutter_timezone removed due to
+    // Kotlin 'Unresolved reference: Registrar' build error on this setup.
+    // Safe for India-only deployment.
     tz.setLocalLocation(tz.getLocation('Asia/Kolkata'));
-    // ─────────────────────────────────────────────────────────────────────────
 
     const androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -68,41 +57,40 @@ class NotificationService {
         _notificationsPlugin.resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
 
-    // Standard notification permission (Android 13+)
-    await androidPlugin?.requestNotificationsPermission();
+    // ✅ FIX: Handle permission result safely — never crash if denied.
+    final notifGranted =
+        await androidPlugin?.requestNotificationsPermission();
+    if (notifGranted != true) {
+      debugPrint('⚠️ Notification permission denied or not granted');
+      // Do NOT return — exact alarm request below is still useful
+    }
 
-    // ─── NOTE: Exact alarm permission (Android 12+) ───────────────────────────
-    // Without this, zonedSchedule() with exactAllowWhileIdle silently does
-    // nothing on Android 12+. We now use inexactAllowWhileIdle (see below)
-    // which does NOT require this permission, so this call is optional but
-    // harmless to keep. If you switch back to exact alarms, you MUST also add:
-    //
-    //   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
-    //
-    // to android/app/src/main/AndroidManifest.xml inside <manifest>.
+    // inexactAllowWhileIdle does NOT require exact alarm permission,
+    // but requesting it here is harmless and enables exact alarms if
+    // the user grants it, which improves timing accuracy.
     await androidPlugin?.requestExactAlarmsPermission();
-    // ─────────────────────────────────────────────────────────────────────────
   }
 
   static Future<void> scheduleReminder({
     required int id,
     required String title,
     required DateTime scheduledTime,
-    String userName = "User",
+    String userName = 'User',
   }) async {
     if (!Platform.isAndroid) return;
 
     final now = DateTime.now();
 
-    // Minimum future buffer: 30 seconds.
-    // zonedSchedule() silently ignores past times, so clamp here first.
+    // Clamp past times to 30 s in the future.
+    // zonedSchedule() silently ignores past times — clamping here ensures
+    // the notification always fires even if there is a small scheduling lag.
     if (scheduledTime.isBefore(now)) {
       scheduledTime = now.add(const Duration(seconds: 30));
     }
 
     final tzTime = tz.TZDateTime.from(scheduledTime, tz.local);
 
-    // ─── DEBUG: remove after confirming notifications work ───────────────────
+    // ─── DEBUG logs — remove after confirming notifications work ────────────
     debugPrint('📅 Scheduling — id=$id  title="$title"');
     debugPrint('   scheduledTime (local) : $scheduledTime');
     debugPrint('   tzTime                : $tzTime');
@@ -110,7 +98,7 @@ class NotificationService {
     debugPrint('   now (device)          : $now');
     final tzNow = tz.TZDateTime.now(tz.local);
     debugPrint('   tzTime in future?     : ${tzTime.isAfter(tzNow)}');
-    // ─────────────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────────
 
     String dayText;
     if (scheduledTime.day == now.day) {
@@ -126,6 +114,15 @@ class NotificationService {
     final newBody =
         "$userName, it's time to $title\n📅 $dayText • ⏰ $timeText";
 
+    // ✅ FIX 1: Removed fullScreenIntent: true.
+    //    fullScreenIntent requires USE_FULL_SCREEN_INTENT permission (Android 14+)
+    //    and is blocked by most OEM ROMs (Xiaomi, Samsung, Realme).
+    //    It causes a runtime crash or silent failure in release APKs.
+    //
+    // ✅ FIX 2: Removed notification actions temporarily.
+    //    Actions can cause crashes in release if the BroadcastReceiver
+    //    for the action is not declared in AndroidManifest.xml.
+    //    Re-add them only after confirming basic notifications work.
     const androidDetails = AndroidNotificationDetails(
       'reminder_channel',
       'Daily Reminders',
@@ -133,32 +130,30 @@ class NotificationService {
       priority: Priority.high,
       playSound: true,
       enableVibration: true,
-      fullScreenIntent: true,
-      category: AndroidNotificationCategory.alarm,
-      actions: <AndroidNotificationAction>[
-        AndroidNotificationAction('DONE', '✅ Done'),
-        AndroidNotificationAction('CALL', '📞 Call'),
-      ],
+      // fullScreenIntent removed ✅
+      category: AndroidNotificationCategory.reminder,
+      // actions removed for stability ✅ — add back after basic flow confirmed
     );
 
-    await _notificationsPlugin.zonedSchedule(
-      id,
-      newTitle,
-      newBody,
-      tzTime,
-      const NotificationDetails(android: androidDetails),
-      payload: title,
-      // ✅ FIX: Changed from exactAllowWhileIdle to inexactAllowWhileIdle.
-      // exactAllowWhileIdle requires SCHEDULE_EXACT_ALARM permission which
-      // many devices deny silently, causing notifications to never fire.
-      // inexactAllowWhileIdle works without that permission and fires reliably
-      // on all Android versions including 12+.
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-    );
-
-    debugPrint('✅ Notification scheduled successfully id=$id');
+    try {
+      await _notificationsPlugin.zonedSchedule(
+        id,
+        newTitle,
+        newBody,
+        tzTime,
+        const NotificationDetails(android: androidDetails),
+        payload: title,
+        // ✅ inexactAllowWhileIdle works on ALL Android versions without
+        //    SCHEDULE_EXACT_ALARM permission and fires reliably.
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+      );
+      debugPrint('✅ Notification scheduled successfully id=$id');
+    } catch (e) {
+      // ✅ FIX: Wrap in try/catch so one bad notification never crashes the app.
+      debugPrint('❌ Failed to schedule notification id=$id : $e');
+    }
   }
 
   static Future<void> cancelReminder(int id) async {

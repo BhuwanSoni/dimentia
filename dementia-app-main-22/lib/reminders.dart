@@ -95,7 +95,6 @@ class _ReminderPageState extends State<ReminderPage> {
     return docId.hashCode.abs() % 2147483647;
   }
 
-  // Auto-schedule notifications for chatbot-created reminders
   StreamSubscription<QuerySnapshot>? _reminderSub;
 
   @override
@@ -126,7 +125,11 @@ class _ReminderPageState extends State<ReminderPage> {
           continue;
         }
 
-        if (scheduledTime.isBefore(DateTime.now())) continue;
+        // ✅ FIX: In release builds, a tiny delay between Firestore write and
+        // this listener firing can make the time appear to be in the past.
+        // NotificationService.scheduleReminder() handles the clamp internally,
+        // so we REMOVE the hard skip here and let the service decide.
+        // Old code:  if (scheduledTime.isBefore(DateTime.now())) continue;
 
         _scheduledIds.add(docId);
         final title = data['task'] ?? data['title'] ?? 'Reminder';
@@ -139,16 +142,16 @@ class _ReminderPageState extends State<ReminderPage> {
       }
     });
 
-    // ✅ FIX: Reschedule all future reminders on every app start.
+    // ✅ Reschedule all future reminders on every app start.
     // The stream above only catches NEW additions. If the app restarts,
     // all previously scheduled notifications are lost from the OS.
-    // This function restores them from Firestore on every launch.
+    // This restores them from Firestore on every launch.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadAndScheduleExistingReminders();
     });
   }
 
-  // ✅ NEW: Load and reschedule all future reminders from Firestore
+  // Load and reschedule all future reminders from Firestore
   Future<void> _loadAndScheduleExistingReminders() async {
     final snapshot = await firestore.getReminders().first;
     if (!mounted) return;
@@ -172,8 +175,12 @@ class _ReminderPageState extends State<ReminderPage> {
         continue;
       }
 
-      // Skip past reminders — nothing to schedule
-      if (scheduledTime.isBefore(DateTime.now())) continue;
+      // Skip clearly old reminders (more than 1 minute in the past)
+      // — nothing useful to schedule for them.
+      if (scheduledTime
+          .isBefore(DateTime.now().subtract(const Duration(minutes: 1)))) {
+        continue;
+      }
 
       // Skip ones the stream already scheduled this session
       if (_scheduledIds.contains(doc.id)) continue;
@@ -244,114 +251,48 @@ class _ReminderPageState extends State<ReminderPage> {
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(
-                            color: Color(0xFF2D6A4F), width: 2),
-                      ),
                     ),
                   ),
-
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 16),
 
                   // Date picker
-                  InkWell(
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.calendar_today,
+                        color: Color(0xFF2D6A4F)),
+                    title: Text(
+                      pickedDate == null
+                          ? 'Pick date'
+                          : DateFormat('MMM d, yyyy').format(pickedDate!),
+                    ),
                     onTap: () async {
-                      final date = await showDatePicker(
+                      final d = await showDatePicker(
                         context: context,
                         initialDate: DateTime.now(),
                         firstDate: DateTime.now(),
-                        lastDate: DateTime(2100),
-                        builder: (context, child) => Theme(
-                          data: Theme.of(context).copyWith(
-                            colorScheme: const ColorScheme.light(
-                              primary: Color(0xFF2D6A4F),
-                            ),
-                          ),
-                          child: child!,
-                        ),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
                       );
-                      if (date != null) {
-                        setDialogState(() => pickedDate = date);
-                      }
+                      if (d != null) setDialogState(() => pickedDate = d);
                     },
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: const Color(0xFF2D6A4F)),
-                        borderRadius: BorderRadius.circular(12),
-                        color: const Color(0xFF2D6A4F).withOpacity(0.05),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.calendar_today,
-                              color: Color(0xFF2D6A4F)),
-                          const SizedBox(width: 10),
-                          Text(
-                            pickedDate == null
-                                ? 'Pick Date'
-                                : DateFormat('EEE, MMM d').format(pickedDate!),
-                            style: TextStyle(
-                              color: pickedDate == null
-                                  ? Colors.grey
-                                  : const Color(0xFF2D6A4F),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
 
-                  const SizedBox(height: 14),
-
                   // Time picker
-                  InkWell(
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading:
+                        const Icon(Icons.access_time, color: Color(0xFF2D6A4F)),
+                    title: Text(
+                      pickedTime == null
+                          ? 'Pick time'
+                          : pickedTime!.format(context),
+                    ),
                     onTap: () async {
-                      final time = await showTimePicker(
+                      final t = await showTimePicker(
                         context: context,
                         initialTime: TimeOfDay.now(),
-                        builder: (context, child) => Theme(
-                          data: Theme.of(context).copyWith(
-                            colorScheme: const ColorScheme.light(
-                              primary: Color(0xFF2D6A4F),
-                            ),
-                          ),
-                          child: child!,
-                        ),
                       );
-                      if (time != null) {
-                        setDialogState(() => pickedTime = time);
-                      }
+                      if (t != null) setDialogState(() => pickedTime = t);
                     },
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: const Color(0xFF2D6A4F)),
-                        borderRadius: BorderRadius.circular(12),
-                        color: const Color(0xFF2D6A4F).withOpacity(0.05),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.access_time,
-                              color: Color(0xFF2D6A4F)),
-                          const SizedBox(width: 10),
-                          Text(
-                            pickedTime == null
-                                ? 'Pick Time'
-                                : pickedTime!.format(context),
-                            style: TextStyle(
-                              color: pickedTime == null
-                                  ? Colors.grey
-                                  : const Color(0xFF2D6A4F),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
                 ],
               ),
@@ -365,51 +306,64 @@ class _ReminderPageState extends State<ReminderPage> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF2D6A4F),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                        borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: () async {
-                    if (titleController.text.isEmpty || pickedTime == null) {
+                    final title = titleController.text.trim();
+                    if (title.isEmpty ||
+                        pickedDate == null ||
+                        pickedTime == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text('Please fill all fields')),
+                      );
                       return;
                     }
 
-                    final text = titleController.text.trim();
-                    final date = pickedDate ?? DateTime.now();
-                    final time = pickedTime!;
-
-                    DateTime finalDateTime = DateTime(
-                      date.year,
-                      date.month,
-                      date.day,
-                      time.hour,
-                      time.minute,
+                    final scheduledTime = DateTime(
+                      pickedDate!.year,
+                      pickedDate!.month,
+                      pickedDate!.day,
+                      pickedTime!.hour,
+                      pickedTime!.minute,
                     );
 
-                    // Clamp to future (notification_service also does this,
-                    // but we do it here first so Firestore gets the right time)
-                    if (finalDateTime.isBefore(DateTime.now())) {
-                      finalDateTime =
-                          DateTime.now().add(const Duration(seconds: 30));
+                    if (scheduledTime.isBefore(DateTime.now())) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text('Please pick a future time')),
+                      );
+                      return;
                     }
-
-                    // Read settings BEFORE Navigator.pop() — after the dialog
-                    // is popped its context is unmounted.
-                    final userName = SettingsProvider.of(context).username;
 
                     Navigator.pop(context);
 
-                    // Save to Firestore first and capture the DocumentReference.
-                    // The doc ID is the only stable source for a consistent notif ID.
+                    // Save to Firestore
                     final docRef =
-                        await firestore.addReminder(text, finalDateTime);
+                        await firestore.addReminder(title, scheduledTime);
+
+                    // Schedule notification using the Firestore doc ID
+                    final userName =
+                        SettingsProvider.of(context).username;
                     final notifId = _notificationIdFromDocId(docRef.id);
+                    _scheduledIds.add(docRef.id);
 
                     await NotificationService.scheduleReminder(
                       id: notifId,
-                      title: text,
-                      scheduledTime: finalDateTime,
+                      title: title,
+                      scheduledTime: scheduledTime,
                       userName: userName,
                     );
+
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                              '✅ Reminder set for ${DateFormat('MMM d • hh:mm a').format(scheduledTime)}'),
+                          backgroundColor: const Color(0xFF2D6A4F),
+                        ),
+                      );
+                    }
                   },
                   child: const Text('Save',
                       style: TextStyle(color: Colors.white)),
@@ -426,10 +380,30 @@ class _ReminderPageState extends State<ReminderPage> {
   // DELETE REMINDER
   // ───────────────────────────────────────────────────────────────────────────
   Future<void> _deleteReminder(Reminder reminder) async {
-    await NotificationService.cancelReminder(
-      _notificationIdFromDocId(reminder.id),
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Reminder'),
+        content: Text('Delete "${reminder.title}"?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child:
+                const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
     );
+
+    if (confirmed != true) return;
+
     await firestore.deleteReminder(reminder.id);
+    await NotificationService.cancelReminder(
+        _notificationIdFromDocId(reminder.id));
+    _scheduledIds.remove(reminder.id);
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -437,170 +411,148 @@ class _ReminderPageState extends State<ReminderPage> {
   // ───────────────────────────────────────────────────────────────────────────
   Widget _buildReminderCard(Reminder reminder) {
     final settings = SettingsProvider.of(context);
+    final now = DateTime.now();
+    final isOverdue =
+        reminder.time.isBefore(now) && !reminder.isCompleted;
+
+    final dayLabel = _dayLabel(reminder.time);
+    final timeLabel = DateFormat('hh:mm a').format(reminder.time);
+    final fullLabel = '$dayLabel • $timeLabel';
 
     IconData cardIcon;
-    final t = reminder.title.toLowerCase();
-    if (t.contains('dawa') ||
-        t.contains('medicine') ||
-        t.contains('tablet') ||
-        t.contains('pill')) {
-      cardIcon = Icons.medication;
-    } else if (t.contains('doctor') || t.contains('hospital')) {
-      cardIcon = Icons.local_hospital;
-    } else if (t.contains('eat') ||
-        t.contains('food') ||
-        t.contains('khana')) {
-      cardIcon = Icons.restaurant;
+    if (reminder.isCompleted) {
+      cardIcon = Icons.check_circle_outline;
+    } else if (isOverdue) {
+      cardIcon = Icons.warning_amber_rounded;
     } else {
-      cardIcon = Icons.notifications_active_rounded;
+      cardIcon = Icons.notifications_active_outlined;
     }
 
-    final bool isOverdue =
-        !reminder.isCompleted && reminder.time.isBefore(DateTime.now());
-
-    final String dayLabel = _dayLabel(reminder.time);
-    final String timeLabel = DateFormat('hh:mm a').format(reminder.time);
-    final String fullLabel = '$dayLabel • $timeLabel';
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: reminder.isCompleted
-            ? Colors.grey.shade100
-            : isOverdue
-                ? Colors.red.shade50
-                : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: isOverdue
-            ? Border.all(color: Colors.red.shade200, width: 1.5)
-            : null,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.07),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          // Icon bubble
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: reminder.isCompleted
-                  ? Colors.grey.shade300
-                  : isOverdue
-                      ? Colors.red.shade100
-                      : const Color(0xFF2D6A4F).withOpacity(0.1),
-              shape: BoxShape.circle,
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            // Icon
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: reminder.isCompleted
+                    ? Colors.grey.shade100
+                    : isOverdue
+                        ? Colors.red.shade50
+                        : const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                cardIcon,
+                color: reminder.isCompleted
+                    ? Colors.grey
+                    : isOverdue
+                        ? Colors.red
+                        : const Color(0xFF2D6A4F),
+                size: 24,
+              ),
             ),
-            child: Icon(
-              cardIcon,
-              color: reminder.isCompleted
-                  ? Colors.grey
-                  : isOverdue
-                      ? Colors.red
-                      : const Color(0xFF2D6A4F),
-              size: 24,
-            ),
-          ),
 
-          const SizedBox(width: 14),
+            const SizedBox(width: 14),
 
-          // Title + date/time
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  reminder.title,
-                  style: TextStyle(
-                    fontSize: 17 * settings.fontSizeMultiplier,
-                    fontWeight: FontWeight.bold,
-                    color: reminder.isCompleted
-                        ? Colors.grey
-                        : Colors.black87,
-                    decoration: reminder.isCompleted
-                        ? TextDecoration.lineThrough
-                        : null,
+            // Title + date/time
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    reminder.title,
+                    style: TextStyle(
+                      fontSize: 17 * settings.fontSizeMultiplier,
+                      fontWeight: FontWeight.bold,
+                      color: reminder.isCompleted
+                          ? Colors.grey
+                          : Colors.black87,
+                      decoration: reminder.isCompleted
+                          ? TextDecoration.lineThrough
+                          : null,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 5),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.access_time,
-                      size: 14,
-                      color: isOverdue
-                          ? Colors.red
-                          : Colors.grey.shade500,
-                    ),
-                    const SizedBox(width: 4),
-                    Flexible(
-                      child: Text(
-                        fullLabel,
-                        style: TextStyle(
-                          fontSize: 14 * settings.fontSizeMultiplier,
-                          color: isOverdue
-                              ? Colors.red
-                              : Colors.grey.shade600,
-                          fontWeight: isOverdue
-                              ? FontWeight.w600
-                              : FontWeight.normal,
-                        ),
+                  const SizedBox(height: 5),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.access_time,
+                        size: 14,
+                        color: isOverdue
+                            ? Colors.red
+                            : Colors.grey.shade500,
                       ),
-                    ),
-                    if (isOverdue) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.red,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Text(
-                          'Overdue',
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          fullLabel,
                           style: TextStyle(
-                              color: Colors.white, fontSize: 10),
+                            fontSize: 14 * settings.fontSizeMultiplier,
+                            color: isOverdue
+                                ? Colors.red
+                                : Colors.grey.shade600,
+                            fontWeight: isOverdue
+                                ? FontWeight.w600
+                                : FontWeight.normal,
+                          ),
                         ),
                       ),
+                      if (isOverdue) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'Overdue',
+                            style: TextStyle(
+                                color: Colors.white, fontSize: 10),
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
+                ],
+              ),
+            ),
+
+            // Actions
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: Icon(
+                    reminder.isCompleted
+                        ? Icons.check_circle
+                        : Icons.radio_button_unchecked,
+                    color: reminder.isCompleted
+                        ? Colors.green
+                        : Colors.grey.shade400,
+                    size: 28,
+                  ),
+                  onPressed: () async {
+                    await firestore.toggleComplete(
+                        reminder.id, !reminder.isCompleted);
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline,
+                      color: Colors.red, size: 24),
+                  onPressed: () => _deleteReminder(reminder),
                 ),
               ],
             ),
-          ),
-
-          // Actions
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: Icon(
-                  reminder.isCompleted
-                      ? Icons.check_circle
-                      : Icons.radio_button_unchecked,
-                  color: reminder.isCompleted
-                      ? Colors.green
-                      : Colors.grey.shade400,
-                  size: 28,
-                ),
-                onPressed: () async {
-                  await firestore.toggleComplete(
-                      reminder.id, !reminder.isCompleted);
-                },
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline,
-                    color: Colors.red, size: 24),
-                onPressed: () => _deleteReminder(reminder),
-              ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     ).animate().fadeIn(duration: 300.ms).slideX(begin: 0.2, duration: 300.ms);
   }

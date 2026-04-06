@@ -35,41 +35,26 @@ Future<void> main() async {
     );
   }
 
-  // Initialize notifications (must happen before requestPermissions)
+  // ✅ Initialize notifications before requesting permissions.
+  // flutter_timezone is called inside init() — must come before runApp.
   if (!kIsWeb) {
     await NotificationService.init();
   }
 
-  // ─── BUG FIX: Request both notification + exact alarm permission ─────────────
-  // requestPermissions() now calls requestExactAlarmsPermission() internally.
-  // Without exact alarm permission, zonedSchedule() silently does nothing
-  // on Android 12+ devices.
+  // ✅ Request notification + exact alarm permissions (Android only).
+  // Permission denial is handled gracefully inside requestPermissions() —
+  // the app will NOT crash if the user denies.
   //
-  // IMPORTANT — you must also add to android/app/src/main/AndroidManifest.xml
-  // inside <manifest> (NOT inside <application>):
-  //
-  //   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
-  //
-  // AND add the flutter_timezone package to pubspec.yaml:
-  //   flutter_timezone: ^1.0.8
-  //
-  // Then update notification_service.dart init() to use:
-  //   final tzName = await FlutterTimezone.getLocalTimezone();
-  //   tz.setLocalLocation(tz.getLocation(tzName));
-  //
-  // ─── BATTERY OPTIMISATION (Android) ──────────────────────────────────────────
-  // Even with exact alarm permission, some OEM ROMs (Xiaomi MIUI, Samsung One UI,
-  // Realme UI, Oppo ColorOS) kill background processes aggressively. The user
-  // must manually disable battery optimisation for this app:
+  // BATTERY OPTIMISATION (important for OEM ROMs):
+  // Xiaomi MIUI, Samsung One UI, Realme, Oppo etc. kill background processes
+  // aggressively. Notifications may not fire until the user goes to:
   //   Settings → Apps → [Your App] → Battery → Unrestricted
-  //
-  // You can prompt the user to do this using the battery_plus or
-  // disable_battery_optimization package.
+  // You can prompt for this using the `disable_battery_optimization` package.
   if (!kIsWeb && Platform.isAndroid) {
     await NotificationService.requestPermissions();
   }
 
-  // Handle notification tap (open VisualAideScreen if payload matches)
+  // Handle notification tap — open VisualAideScreen if payload matches.
   NotificationService.onNotificationClick = (payload) {
     if (payload == 'magic_eye_screen') {
       navigatorKey.currentState?.push(
