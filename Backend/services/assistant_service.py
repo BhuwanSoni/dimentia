@@ -622,6 +622,32 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
     if memory_data:
         store_memory(user_id, memory_data)
 
+        # ✅ FIX: Return a clear confirmation so the user knows the item was saved.
+        # Previously the code fell through to the Groq LLM which gave a vague/wrong reply.
+        obj = memory_data.get("object_name") or memory_data.get("identifier", "item")
+        loc = memory_data.get("location", "there")
+
+        if lang in ["Hindi", "Hinglish"]:
+            confirm_reply = (
+                f"समझ गया! 😊 मैंने याद कर लिया कि आपका {obj} {loc} में है। "
+                f"जब भी ढूंढना हो, बस पूछें! 💙"
+            )
+        else:
+            confirm_reply = (
+                f"Got it! 😊 I've remembered that your {obj} is in the {loc}. "
+                f"Just ask me 'Where is my {obj}?' anytime! 💙"
+            )
+
+        # Also save this exchange to chat history so it appears in conversation log
+        db.collection("users").document(user_id).collection("chats").add({
+            "user_message":    user_message,
+            "assistant_reply": confirm_reply,
+            "risk_level":      risk_level,
+            "timestamp":       firestore.SERVER_TIMESTAMP,
+        })
+
+        return {"reply": confirm_reply, "risk_level": risk_level}
+
     # ==========================================================
     # 2️⃣ Risk Level
     # ==========================================================

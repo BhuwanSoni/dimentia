@@ -52,7 +52,7 @@ class EmergencyActivity : FlutterActivity() {
  
         // ✅ Dynamic subtitle + safe empty number handling
         if (phoneNumber.isBlank()) {
-            tvSubtitle.text   = "No emergency contact found"
+            tvSubtitle.text   = "Please add a number in Settings"
             tvNumber.text     = "⚠️ Please add a number in Settings"
             callBtn.isEnabled = false
             callBtn.alpha     = 0.4f
