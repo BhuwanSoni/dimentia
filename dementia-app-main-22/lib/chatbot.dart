@@ -224,6 +224,10 @@ class _ChatScreenState extends State<ChatScreen> {
         _isLoading = false;
         messages.add({'sender': 'bot', 'text': botResponse, 'time': DateTime.now()});
       });
+      // ✅ FIX: Refresh stored items cache after every message so the
+      // "Find My Item" sheet always shows the latest data without needing
+      // to close and reopen the app.
+      _refreshStoredItems();
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -232,6 +236,33 @@ class _ChatScreenState extends State<ChatScreen> {
       });
     }
     _scrollToBottom();
+  }
+
+  // ✅ FIX: Silently refresh the object_memories cache in the background.
+  // Called after every bot reply so _storedItems is always up-to-date.
+  Future<void> _refreshStoredItems() async {
+    try {
+      final uid = user?.uid ?? '';
+      if (uid.isEmpty) return;
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('object_memories')
+          .get();
+      if (!mounted) return;
+      setState(() {
+        _storedItems = snapshot.docs.map((doc) {
+          final data = doc.data();
+          return <String, dynamic>{
+            'object_name': data['object_name'] ?? data['identifier'] ?? '',
+            'identifier':  data['identifier']  ?? '',
+            'location':    data['location']    ?? 'Unknown',
+          };
+        }).toList();
+      });
+    } catch (_) {
+      // Silent — this is a background refresh, don't disrupt the user
+    }
   }
 
   Future<void> _sendDirectMessage(String text) async {
@@ -333,7 +364,15 @@ User Profile:
     setState(() => _itemsLoading = true);
 
     try {
-      final uid      = user?.uid ?? '';
+      final uid = user?.uid ?? '';
+      if (uid.isEmpty) {
+        setState(() => _itemsLoading = false);
+        return;
+      }
+
+      // ✅ FIX: Always fetch fresh from Firestore when sheet opens, so newly
+      // stored items (e.g. "My aadhar card is in the drawer") are visible
+      // immediately without restarting the app.
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
@@ -353,8 +392,19 @@ User Profile:
         _storedItems  = items;
         _itemsLoading = false;
       });
-    } catch (_) {
+    } catch (e) {
+      // ✅ FIX: Show error instead of silently swallowing it, so you can
+      // actually debug when Firestore fails.
       setState(() => _itemsLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not load items. Please try again.'),
+            backgroundColor: const Color(0xFF2D6A4F),
+          ),
+        );
+      }
+      return; // ✅ Don't open an empty sheet when fetch actually failed
     }
 
     if (!mounted) return;

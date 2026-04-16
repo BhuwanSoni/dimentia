@@ -584,6 +584,63 @@ def detect_language(text):
 
 
 # =========================================================
+# 🔍 FUZZY OBJECT MEMORY SCANNER
+# Fallback when memory_service.get_object_memories() misses
+# a freshly-stored item due to field-name or casing mismatch.
+# =========================================================
+
+def _fuzzy_scan_object_memories(db, user_id, query):
+    """
+    Scan ALL docs in object_memories and return any whose
+    object_name / identifier / location fields contain the query
+    as a substring (case-insensitive).
+    Returns a list of dicts compatible with the existing memory format.
+    """
+    query_lower = query.lower().strip()
+    query_words = set(query_lower.split())
+
+    try:
+        docs = (
+            db.collection("users")
+              .document(user_id)
+              .collection("object_memories")
+              .stream()
+        )
+    except Exception as e:
+        print(f"⚠️ _fuzzy_scan_object_memories error: {e}")
+        return []
+
+    results = []
+    for doc in docs:
+        data = doc.to_dict()
+        if not data:
+            continue
+
+        # Collect all text fields we want to match against
+        obj_name   = str(data.get("object_name")  or data.get("identifier") or "").lower()
+        identifier = str(data.get("identifier")   or "").lower()
+        location   = str(data.get("location")     or "").lower()
+
+        # Match if query appears as substring OR any query word appears in the object name
+        combined = f"{obj_name} {identifier}"
+        hit = (
+            query_lower in combined
+            or any(w in combined for w in query_words if len(w) > 2)
+        )
+        if hit:
+            results.append({
+                "object_name": data.get("object_name") or data.get("identifier", ""),
+                "identifier":  data.get("identifier",  ""),
+                "location":    data.get("location",    "Unknown"),
+                "confidence":  data.get("confidence",  1),
+                "doc_id":      doc.id,
+            })
+            print(f"✅ Fuzzy match found: {data}")
+
+    return results
+
+
+# =========================================================
 # 🚀 MAIN CHAT FUNCTION
 # =========================================================
 
@@ -800,6 +857,11 @@ User Profile:
         object_name     = re.sub(r"[^\w\s]", "", match.group(1) or match.group(2) or "").strip()
         object_memories = get_object_memories(user_id, object_name)
 
+        # ✅ FIX: If get_object_memories returns nothing, do a direct Firestore
+        #    fuzzy scan so freshly-stored items are found immediately.
+        if not object_memories:
+            object_memories = _fuzzy_scan_object_memories(db, user_id, object_name)
+
         if len(object_memories) > 1:
             set_pending_object(user_id, object_name)
             if lang in ["Hindi", "Hinglish"]:
@@ -817,13 +879,17 @@ User Profile:
         elif len(object_memories) == 1:
             mem = object_memories[0]
             increment_memory_confidence(user_id, mem)
+            # ✅ FIX: Build a clean label — don't print blank identifier prefix
+            identifier = mem.get("identifier", "").strip()
+            display_name = f"{identifier} {object_name}".strip() if identifier and identifier.lower() != object_name.lower() else object_name
+            location = mem.get("location", "there")
             if lang in ["Hindi", "Hinglish"]:
                 return {
-                    "reply": f"मिल गया! 😊 आपका {mem['identifier']} {object_name} {mem['location']} में है।",
+                    "reply": f"मिल गया! 😊 आपका {display_name} {location} में है। 💙",
                     "risk_level": risk_level,
                 }
             return {
-                "reply": f"Found it! 😊 Your {mem['identifier']} {object_name} is in the {mem['location']}.",
+                "reply": f"Found it! 😊 Your {display_name} is in the {location}. 💙",
                 "risk_level": risk_level,
             }
         else:
