@@ -621,11 +621,11 @@ def _fuzzy_scan_object_memories(db, user_id, query):
         identifier = str(data.get("identifier")   or "").lower()
         location   = str(data.get("location")     or "").lower()
 
-        # Match if query appears as substring OR any query word appears in the object name
-        combined = f"{obj_name} {identifier}"
+        # Match if query appears as substring OR any query word appears in obj/identifier/location
+        combined = f"{obj_name} {identifier} {location}".strip()
         hit = (
             query_lower in combined
-            or any(w in combined for w in query_words if len(w) > 2)
+            or any(w in combined for w in query_words)
         )
         if hit:
             results.append({
@@ -854,11 +854,23 @@ User Profile:
     match = re.search(r"where is (?:my|the) (.+)|(?:mera|meri|मेरा|मेरी) (.+?) (?:kahan|कहाँ)", user_lower)
 
     if match:
-        object_name     = re.sub(r"[^\w\s]", "", match.group(1) or match.group(2) or "").strip()
+        # ✅ FIX 1: Normalize to lowercase to avoid case mismatches
+        object_name     = re.sub(r"[^\w\s]", "", match.group(1) or match.group(2) or "").lower().strip()
         object_memories = get_object_memories(user_id, object_name)
 
-        # ✅ FIX: If get_object_memories returns nothing, do a direct Firestore
-        #    fuzzy scan so freshly-stored items are found immediately.
+        # ✅ FIX 2: Try each keyword individually if full name lookup fails
+        # e.g. stored as object_name="card", identifier="aadhar" but query="aadhar card"
+        if not object_memories:
+            keywords = object_name.split()
+            seen_ids = set()
+            for word in keywords:
+                for mem in get_object_memories(user_id, word):
+                    dedup_key = mem.get("doc_id") or mem.get("identifier") or mem.get("object_name", "")
+                    if dedup_key not in seen_ids:
+                        object_memories.append(mem)
+                        seen_ids.add(dedup_key)
+
+        # ✅ FIX 3: Final fallback — full Firestore fuzzy scan
         if not object_memories:
             object_memories = _fuzzy_scan_object_memories(db, user_id, object_name)
 

@@ -16,13 +16,11 @@ class _L {
   final bool isHindi;
   const _L(this.isHindi);
 
-  // ── App bar ───────────────────────────────────────────────
   String get appTitle => 'Memoir AI';
   String hereFor(String name) =>
       isHindi ? 'आपके साथ हूँ, $name 💙' : 'Here for you, $name 💙';
   String get alwaysHere => isHindi ? 'हमेशा आपके साथ 💙' : 'Always here for you 💙';
 
-  // ── Welcome ───────────────────────────────────────────────
   String welcome(String name) => isHindi
       ? 'नमस्ते $name! 😊 मैं Memoir हूँ, आपका व्यक्तिगत स्मृति सहायक।\n\n'
         'मैं आपकी मदद करता हूँ:\n'
@@ -37,57 +35,54 @@ class _L {
         '• 🧠 Keeping track of important memories\n\n'
         'Type /help anytime to see everything I can do! 💙';
 
-  // ── Chips ─────────────────────────────────────────────────
   String get chipReminder    => isHindi ? '⏰ रिमाइंडर सेट करें' : '⏰ Set a reminder';
   String get chipFindItem    => isHindi ? '📍 चीज़ ढूंढें'       : '📍 Find my item';
   String get chipMyReminders => isHindi ? '📋 मेरे रिमाइंडर'     : '📋 My reminders';
   String get chipHelp        => isHindi ? '❓ सहायता'             : '❓ Help';
 
-  // ── Input hint ────────────────────────────────────────────
   String get inputHint =>
       isHindi ? 'कुछ भी पूछें या /help टाइप करें...' : 'Ask me anything or type /help...';
-
-  // ── Help tooltip ──────────────────────────────────────────
   String get helpTooltip =>
       isHindi ? 'देखें मैं क्या कर सकता हूँ' : 'See what I can do';
 
-  // ── Reminder sheet ────────────────────────────────────────
-  String get reminderSheetTitle =>
-      isHindi ? '⏰ रिमाइंडर सेट करें' : '⏰ Set a Reminder';
+  String get reminderSheetTitle    => isHindi ? '⏰ रिमाइंडर सेट करें' : '⏰ Set a Reminder';
   String get reminderSheetSubtitle =>
       isHindi ? 'जानकारी भरें, मैं याद दिलाऊंगा! 😊' : 'Fill in the details and I\'ll remind you! 😊';
   String get reminderTaskLabel =>
       isHindi ? 'मुझे क्या याद दिलाना है?' : 'What should I remind you about?';
   String get reminderTaskHint =>
       isHindi ? 'जैसे: दवाई लेना, डॉक्टर अपॉइंटमेंट…' : 'e.g. Take medicine, Doctor appointment…';
-  String get reminderDateLabel  => isHindi ? 'तारीख'        : 'Date';
-  String get reminderTimeLabel  => isHindi ? 'समय'          : 'Time';
+  String get reminderDateLabel   => isHindi ? 'तारीख'        : 'Date';
+  String get reminderTimeLabel   => isHindi ? 'समय'          : 'Time';
   String get reminderRepeatLabel => isHindi ? 'दोहराएं'      : 'Repeat';
-  String get repeatOnce         => isHindi ? 'एक बार'       : 'One-time';
-  String get repeatDaily        => isHindi ? 'रोज़'          : 'Daily';
-  String get repeatWeekly       => isHindi ? 'साप्ताहिक'     : 'Weekly';
-  String get reminderConfirm    => isHindi ? 'रिमाइंडर सेट करें 🎉' : 'Set Reminder 🎉';
-  String get reminderEmptyWarn  =>
+  String get repeatOnce          => isHindi ? 'एक बार'       : 'One-time';
+  String get repeatDaily         => isHindi ? 'रोज़'          : 'Daily';
+  String get repeatWeekly        => isHindi ? 'साप्ताहिक'     : 'Weekly';
+  String get reminderConfirm     => isHindi ? 'रिमाइंडर सेट करें 🎉' : 'Set Reminder 🎉';
+  String get reminderEmptyWarn   =>
       isHindi ? 'कृपया बताएं क्या याद दिलाना है 😊' : 'Please enter what to remind you about 😊';
 
-  // ── Find item sheet ───────────────────────────────────────
-  String get findSheetTitle =>
-      isHindi ? '📍 मेरी चीज़ ढूंढें' : '📍 Find My Item';
-  String get findSheetSubtitle =>
-      isHindi ? 'चीज़ पर टैप करें 😊' : 'Tap an item to find where you kept it 😊';
-  String get findSearchHint => isHindi ? 'चीज़ें खोजें…'     : 'Search items…';
-  String get findEmpty =>
-      isHindi ? 'अभी कोई चीज़ सेव नहीं है।\nमुझे बताएं आप चीज़ें कहाँ रखते हैं!' : 'No items stored yet.\nTell me where you keep things!';
-  String get findNoMatch =>
-      isHindi ? 'कोई मिलान नहीं मिला।' : 'No items match your search.';
+  // ── Find Item In-Chat ──────────────────────────────────────
+  String get findCardTitle    => isHindi ? '📍 आपकी सेव की हुई चीज़ें' : '📍 Your Saved Items';
+  String get findCardSubtitle =>
+      isHindi ? 'जिस चीज़ को ढूंढना हो उस पर टैप करें' : 'Tap any item to find where you kept it';
+  String get findSearchHint   => isHindi ? 'चीज़ें खोजें…'     : 'Search items…';
+  String get findEmpty        =>
+      isHindi
+          ? 'अभी कोई चीज़ सेव नहीं है।\nमुझे बताएं आप चीज़ें कहाँ रखते हैं!'
+          : 'No items saved yet.\nTell me where you keep things!';
+  String get findNoMatch      => isHindi ? 'कोई मिलान नहीं मिला।' : 'No items match your search.';
+  String get findLoading      => isHindi ? 'चीज़ें ढूंढ रहे हैं…' : 'Loading your items…';
+  String get findError        =>
+      isHindi ? 'चीज़ें लोड नहीं हो सकीं। फिर से कोशिश करें।' : 'Could not load items. Please try again.';
 
-  // ── Errors ────────────────────────────────────────────────
   String get errorMsg =>
-      isHindi ? 'ओह नहीं, कनेक्शन में थोड़ी दिक्कत हुई। 😔 फिर से कोशिश करें!' : 'Oh no, I had a little trouble connecting. 😔 Please try again!';
+      isHindi ? 'ओह नहीं, कनेक्शन में थोड़ी दिक्कत हुई। 😔 फिर से कोशिश करें!'
+              : 'Oh no, I had a little trouble connecting. 😔 Please try again!';
   String get errorDirectMsg =>
-      isHindi ? 'ओह नहीं, कुछ गड़बड़ हो गई। 😔 फिर से कोशिश करें!' : 'Oh no, I had a little trouble. 😔 Please try again!';
+      isHindi ? 'ओह नहीं, कुछ गड़बड़ हो गई। 😔 फिर से कोशिश करें!'
+              : 'Oh no, I had a little trouble. 😔 Please try again!';
 
-  // ── Backend messages ──────────────────────────────────────
   String reminderMsg(String task, String time, String dateStr, String recurStr) =>
       isHindi
           ? 'मुझे $task की याद दिलाएं $time बजे $dateStr को$recurStr'
@@ -99,7 +94,6 @@ class _L {
   String get myRemindersMsg =>
       isHindi ? 'मेरे रिमाइंडर क्या हैं?' : 'What are my reminders?';
 
-  // ── Month names ───────────────────────────────────────────
   String monthName(int m) {
     if (isHindi) {
       const months = [
@@ -115,8 +109,15 @@ class _L {
     return months[m];
   }
 
-  // ── Language toggle label ─────────────────────────────────
   String get langToggle => isHindi ? 'EN' : 'हिं';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 💬  MESSAGE TYPE ENUM
+// ═══════════════════════════════════════════════════════════════
+enum _MessageType {
+  text,        // Normal chat bubble
+  findItems,   // In-chat "Find My Item" card
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -139,7 +140,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _showEmoji      = false;
   bool _welcomeSent    = false;
   bool _showQuickChips = true;
-  bool _isHindi        = false; // ← language toggle
+  bool _isHindi        = false;
 
   // ── Reminder sheet state ──────────────────────────────────
   String    _reminderTask      = '';
@@ -147,11 +148,14 @@ class _ChatScreenState extends State<ChatScreen> {
   TimeOfDay _reminderTime      = TimeOfDay.now();
   String    _reminderRecurring = 'none';
 
-  // ── Find-item sheet state ─────────────────────────────────
-  List<Map<String, dynamic>> _storedItems = [];
-  bool _itemsLoading = false;
+  // ── Find-item state ───────────────────────────────────────
+  List<Map<String, dynamic>> _storedItems    = [];
+  bool                       _itemsLoading   = false;
+  String?                    _itemsError;
 
   final user = FirebaseAuth.instance.currentUser;
+
+  // ── Messages list: each entry has 'type', plus type-specific fields ──
   final List<Map<String, dynamic>> messages = [];
 
   _L get _l => _L(_isHindi);
@@ -167,9 +171,10 @@ class _ChatScreenState extends State<ChatScreen> {
       final name     = settings.username.isNotEmpty ? settings.username : 'there';
       setState(() {
         messages.add({
+          'type':   _MessageType.text,
           'sender': 'bot',
-          'text': _l.welcome(name),
-          'time': DateTime.now(),
+          'text':   _l.welcome(name),
+          'time':   DateTime.now(),
         });
       });
       _welcomeSent = true;
@@ -192,9 +197,6 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────
-  // Language toggle
-  // ─────────────────────────────────────────────────────────
   void _toggleLanguage() => setState(() => _isHindi = !_isHindi);
 
   // ─────────────────────────────────────────────────────────
@@ -206,7 +208,12 @@ class _ChatScreenState extends State<ChatScreen> {
 
     _controller.clear();
     setState(() {
-      messages.add({'sender': 'user', 'text': userInput, 'time': DateTime.now()});
+      messages.add({
+        'type':   _MessageType.text,
+        'sender': 'user',
+        'text':   userInput,
+        'time':   DateTime.now(),
+      });
       _isLoading      = true;
       _showEmoji      = false;
       _showQuickChips = false;
@@ -222,24 +229,163 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        messages.add({'sender': 'bot', 'text': botResponse, 'time': DateTime.now()});
+        messages.add({
+          'type':   _MessageType.text,
+          'sender': 'bot',
+          'text':   botResponse,
+          'time':   DateTime.now(),
+        });
       });
-      // ✅ FIX: Refresh stored items cache after every message so the
-      // "Find My Item" sheet always shows the latest data without needing
-      // to close and reopen the app.
       _refreshStoredItems();
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        messages.add({'sender': 'bot', 'text': _l.errorMsg, 'time': DateTime.now()});
+        messages.add({
+          'type':   _MessageType.text,
+          'sender': 'bot',
+          'text':   _l.errorMsg,
+          'time':   DateTime.now(),
+        });
       });
     }
     _scrollToBottom();
   }
 
-  // ✅ FIX: Silently refresh the object_memories cache in the background.
-  // Called after every bot reply so _storedItems is always up-to-date.
+  // Send a message programmatically (from chips / sheets)
+  Future<void> _sendDirectMessage(String text) async {
+    try {
+      final settings    = SettingsProvider.of(context);
+      final botResponse = await _chatbotService.sendMessage(
+        text,
+        profileText: _buildProfileText(settings),
+      );
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        messages.add({
+          'type':   _MessageType.text,
+          'sender': 'bot',
+          'text':   botResponse,
+          'time':   DateTime.now(),
+        });
+      });
+      _refreshStoredItems();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        messages.add({
+          'type':   _MessageType.text,
+          'sender': 'bot',
+          'text':   _l.errorDirectMsg,
+          'time':   DateTime.now(),
+        });
+      });
+    }
+    _scrollToBottom();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Find My Item — IN-CHAT CARD
+  // ─────────────────────────────────────────────────────────
+
+  /// Fetches items and injects a special 'findItems' message bubble into the chat.
+  Future<void> _openFindItemInChat() async {
+    if (_isLoading) return;
+
+    // 1️⃣  Show the card immediately with a loading state
+    final int cardIndex = messages.length;
+    setState(() {
+      _showQuickChips = false;
+      // User-side message
+      messages.add({
+        'type':   _MessageType.text,
+        'sender': 'user',
+        'text':   _l.chipFindItem,
+        'time':   DateTime.now(),
+      });
+      // Bot-side find-items card (loading)
+      messages.add({
+        'type':      _MessageType.findItems,
+        'sender':    'bot',
+        'time':      DateTime.now(),
+        'loading':   true,
+        'error':     null,
+        'items':     <Map<String, dynamic>>[],
+        'search':    '',
+      });
+    });
+    _scrollToBottom();
+
+    // 2️⃣  Fetch from Firestore
+    final uid = user?.uid ?? '';
+    if (uid.isEmpty) {
+      _updateFindCard(cardIndex + 1, error: _l.findError, items: []);
+      return;
+    }
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('object_memories')
+          .get();
+
+      final items = snapshot.docs.map((doc) {
+        final data = doc.data();
+        return <String, dynamic>{
+          'object_name': data['object_name'] ?? data['identifier'] ?? '',
+          'identifier':  data['identifier']  ?? '',
+          'location':    data['location']    ?? 'Unknown',
+        };
+      }).toList();
+
+      if (!mounted) return;
+      setState(() => _storedItems = items);
+      _updateFindCard(cardIndex + 1, items: items);
+    } catch (e) {
+      if (!mounted) return;
+      _updateFindCard(cardIndex + 1, error: _l.findError, items: []);
+    }
+  }
+
+  void _updateFindCard(int index, {
+    List<Map<String, dynamic>>? items,
+    String? error,
+  }) {
+    if (index < 0 || index >= messages.length) return;
+    setState(() {
+      messages[index] = {
+        ...messages[index],
+        'loading': false,
+        'items':   items ?? [],
+        'error':   error,
+      };
+    });
+    _scrollToBottom();
+  }
+
+  /// Called when user taps an item inside the in-chat card.
+  void _onFindItemTap(String objectName) {
+    final message = _l.findMsg(objectName);
+    setState(() {
+      messages.add({
+        'type':   _MessageType.text,
+        'sender': 'user',
+        'text':   message,
+        'time':   DateTime.now(),
+      });
+      _isLoading = true;
+    });
+    _scrollToBottom();
+    _sendDirectMessage(message);
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Helpers
+  // ─────────────────────────────────────────────────────────
+
   Future<void> _refreshStoredItems() async {
     try {
       final uid = user?.uid ?? '';
@@ -261,30 +407,8 @@ class _ChatScreenState extends State<ChatScreen> {
         }).toList();
       });
     } catch (_) {
-      // Silent — this is a background refresh, don't disrupt the user
+      // Silent background refresh
     }
-  }
-
-  Future<void> _sendDirectMessage(String text) async {
-    try {
-      final settings    = SettingsProvider.of(context);
-      final botResponse = await _chatbotService.sendMessage(
-        text,
-        profileText: _buildProfileText(settings),
-      );
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        messages.add({'sender': 'bot', 'text': botResponse, 'time': DateTime.now()});
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        messages.add({'sender': 'bot', 'text': _l.errorDirectMsg, 'time': DateTime.now()});
-      });
-    }
-    _scrollToBottom();
   }
 
   String _buildProfileText(dynamic settings) => '''
@@ -332,9 +456,9 @@ User Profile:
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => _ReminderSheet(
-        l:               _l,
-        initialDate:     _reminderDate,
-        initialTime:     _reminderTime,
+        l:                _l,
+        initialDate:      _reminderDate,
+        initialTime:      _reminderTime,
         initialRecurring: _reminderRecurring,
         onConfirm: (task, date, time, recurring) {
           Navigator.pop(ctx);
@@ -347,81 +471,12 @@ User Profile:
 
           setState(() {
             _showQuickChips = false;
-            messages.add({'sender': 'user', 'text': message, 'time': DateTime.now()});
-            _isLoading = true;
-          });
-          _scrollToBottom();
-          _sendDirectMessage(message);
-        },
-      ),
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────
-  // 📍 Find-item sheet
-  // ─────────────────────────────────────────────────────────
-  Future<void> _openFindItemSheet() async {
-    setState(() => _itemsLoading = true);
-
-    try {
-      final uid = user?.uid ?? '';
-      if (uid.isEmpty) {
-        setState(() => _itemsLoading = false);
-        return;
-      }
-
-      // ✅ FIX: Always fetch fresh from Firestore when sheet opens, so newly
-      // stored items (e.g. "My aadhar card is in the drawer") are visible
-      // immediately without restarting the app.
-      final snapshot = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('object_memories')
-          .get();
-
-      final items = snapshot.docs.map((doc) {
-        final data = doc.data();
-        return <String, dynamic>{
-          'object_name': data['object_name'] ?? data['identifier'] ?? '',
-          'identifier':  data['identifier']  ?? '',
-          'location':    data['location']    ?? 'Unknown',
-        };
-      }).toList();
-
-      setState(() {
-        _storedItems  = items;
-        _itemsLoading = false;
-      });
-    } catch (e) {
-      // ✅ FIX: Show error instead of silently swallowing it, so you can
-      // actually debug when Firestore fails.
-      setState(() => _itemsLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not load items. Please try again.'),
-            backgroundColor: const Color(0xFF2D6A4F),
-          ),
-        );
-      }
-      return; // ✅ Don't open an empty sheet when fetch actually failed
-    }
-
-    if (!mounted) return;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _FindItemSheet(
-        l:     _l,
-        items: _storedItems,
-        onItemTap: (objectName) {
-          Navigator.pop(ctx);
-          final message = _l.findMsg(objectName);
-          setState(() {
-            _showQuickChips = false;
-            messages.add({'sender': 'user', 'text': message, 'time': DateTime.now()});
+            messages.add({
+              'type':   _MessageType.text,
+              'sender': 'user',
+              'text':   message,
+              'time':   DateTime.now(),
+            });
             _isLoading = true;
           });
           _scrollToBottom();
@@ -463,6 +518,7 @@ User Profile:
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
                     itemCount: messages.length + (_isLoading ? 1 : 0),
                     itemBuilder: (context, index) {
+                      // Typing indicator
                       if (_isLoading && index == messages.length) {
                         return Padding(
                           padding: const EdgeInsets.only(top: 8, bottom: 12),
@@ -472,7 +528,24 @@ User Profile:
                           ),
                         );
                       }
-                      final msg = messages[index];
+
+                      final msg  = messages[index];
+                      final type = msg['type'] as _MessageType;
+
+                      // ── Find Items card ──
+                      if (type == _MessageType.findItems) {
+                        return _FindItemsChatCard(
+                          l:         _l,
+                          loading:   msg['loading'] as bool,
+                          error:     msg['error'] as String?,
+                          items:     List<Map<String, dynamic>>.from(msg['items'] as List),
+                          time:      msg['time'] as DateTime,
+                          onItemTap: _onFindItemTap,
+                          fontSizeMultiplier: settings.fontSizeMultiplier,
+                        );
+                      }
+
+                      // ── Normal text bubble ──
                       return _buildMessageBubble(
                         msg, msg['sender'] == 'user', settings.fontSizeMultiplier);
                     },
@@ -556,7 +629,6 @@ User Profile:
         ),
       ),
       actions: [
-        // 🌐 Language toggle
         Padding(
           padding: const EdgeInsets.only(right: 6),
           child: Tooltip(
@@ -578,8 +650,7 @@ User Profile:
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(_isHindi ? '🇮🇳' : '🇬🇧',
-                        style: const TextStyle(fontSize: 13)),
+                    Text(_isHindi ? '🇮🇳' : '🇬🇧', style: const TextStyle(fontSize: 13)),
                     const SizedBox(width: 3),
                     Flexible(
                       child: Text(
@@ -598,7 +669,6 @@ User Profile:
             ),
           ),
         ),
-        // ❓ /help button
         Padding(
           padding: const EdgeInsets.only(right: 12),
           child: Tooltip(
@@ -641,8 +711,7 @@ User Profile:
                 padding: const EdgeInsets.all(2),
                 decoration: const BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient:
-                      LinearGradient(colors: [Color(0xFF2D6A4F), Color(0xFF26A69A)]),
+                  gradient: LinearGradient(colors: [Color(0xFF2D6A4F), Color(0xFF26A69A)]),
                 ),
                 child: CircleAvatar(
                   radius: 20,
@@ -651,11 +720,9 @@ User Profile:
                 ),
               ),
               Positioned(
-                bottom: 0,
-                right: 0,
+                bottom: 0, right: 0,
                 child: Container(
-                  width: 12,
-                  height: 12,
+                  width: 12, height: 12,
                   decoration: BoxDecoration(
                     color: Colors.greenAccent[400],
                     shape: BoxShape.circle,
@@ -674,14 +741,10 @@ User Profile:
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    _l.appTitle,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: Color(0xFF1F2937),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18),
-                  ),
+                  Text(_l.appTitle,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: Color(0xFF1F2937), fontWeight: FontWeight.bold, fontSize: 18)),
                   Text(
                     name != null ? _l.hereFor(name) : _l.alwaysHere,
                     overflow: TextOverflow.ellipsis,
@@ -706,35 +769,23 @@ User Profile:
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: const BorderRadius.only(
-          topLeft:     Radius.circular(20),
-          topRight:    Radius.circular(20),
-          bottomRight: Radius.circular(20),
-          bottomLeft:  Radius.circular(4),
+          topLeft: Radius.circular(20), topRight: Radius.circular(20),
+          bottomRight: Radius.circular(20), bottomLeft: Radius.circular(4),
         ),
         boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 4)),
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
         ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        children: [
-          _dot(0),
-          const SizedBox(width: 4),
-          _dot(150),
-          const SizedBox(width: 4),
-          _dot(300),
-        ],
+        children: [_dot(0), const SizedBox(width: 4), _dot(150), const SizedBox(width: 4), _dot(300)],
       ),
     ).animate().fadeIn().slideX(begin: -0.1);
   }
 
   Widget _dot(int delay) {
     return Container(
-      width: 6,
-      height: 6,
+      width: 6, height: 6,
       decoration: const BoxDecoration(color: Color(0xFF26A69A), shape: BoxShape.circle),
     ).animate(onPlay: (c) => c.repeat(reverse: true))
         .scaleXY(begin: 0.6, end: 1.2, duration: 600.ms, delay: delay.ms);
@@ -752,19 +803,16 @@ User Profile:
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.only(bottom: 16),
-        constraints:
-            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
         child: Column(
-          crossAxisAlignment:
-              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: isUser ? const Color(0xFF2D6A4F) : Colors.white,
                 gradient: isUser
-                    ? const LinearGradient(
-                        colors: [Color(0xFF2D6A4F), Color(0xFF26A69A)])
+                    ? const LinearGradient(colors: [Color(0xFF2D6A4F), Color(0xFF26A69A)])
                     : null,
                 borderRadius: BorderRadius.only(
                   topLeft:     const Radius.circular(20),
@@ -773,10 +821,7 @@ User Profile:
                   bottomRight: Radius.circular(isUser ? 4 : 20),
                 ),
                 boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 10,
-                      offset: const Offset(0, 5)),
+                  BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 5)),
                 ],
               ),
               child: SelectableText(
@@ -791,8 +836,8 @@ User Profile:
               padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
               child: Text(time,
                   style: TextStyle(
-                      fontSize:   (11 * fontSizeMultiplier).clamp(9.0, 14.0),
-                      color:      Colors.grey[500],
+                      fontSize: (11 * fontSizeMultiplier).clamp(9.0, 14.0),
+                      color: Colors.grey[500],
                       fontWeight: FontWeight.w500)),
             ),
           ],
@@ -807,7 +852,8 @@ User Profile:
   Widget _buildQuickChips() {
     final chips = [
       {'label': _l.chipReminder,    'onTap': () => _openReminderSheet()},
-      {'label': _l.chipFindItem,    'onTap': () => _openFindItemSheet()},
+      // ✅ Now triggers in-chat card instead of bottom sheet
+      {'label': _l.chipFindItem,    'onTap': () => _openFindItemInChat()},
       {
         'label': _l.chipMyReminders,
         'onTap': () { _controller.text = _l.myRemindersMsg; _sendMessage(); },
@@ -834,21 +880,15 @@ User Profile:
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: const Color(0xFF2D6A4F).withOpacity(0.35)),
+                    border: Border.all(color: const Color(0xFF2D6A4F).withOpacity(0.35)),
                     boxShadow: [
-                      BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2)),
+                      BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2)),
                     ],
                   ),
                   child: Text(
                     chip['label']! as String,
                     style: const TextStyle(
-                        color: Color(0xFF2D6A4F),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500),
+                        color: Color(0xFF2D6A4F), fontSize: 13, fontWeight: FontWeight.w500),
                   ),
                 ),
               ),
@@ -874,34 +914,26 @@ User Profile:
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(30),
                 boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 15,
-                      offset: const Offset(0, 5)),
+                  BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 15, offset: const Offset(0, 5)),
                 ],
               ),
               child: TextField(
-                focusNode:    _focusNode,
-                controller:   _controller,
-                onSubmitted:  (_) => _sendMessage(),
-                maxLines:     4,
-                minLines:     1,
-                style:        TextStyle(fontSize: (16 * fontSizeMultiplier).clamp(12.0, 20.0)),
-                cursorColor:  const Color(0xFF2D6A4F),
+                focusNode:   _focusNode,
+                controller:  _controller,
+                onSubmitted: (_) => _sendMessage(),
+                maxLines: 4,
+                minLines: 1,
+                style:       TextStyle(fontSize: (16 * fontSizeMultiplier).clamp(12.0, 20.0)),
+                cursorColor: const Color(0xFF2D6A4F),
                 decoration: InputDecoration(
                   hintText:  _l.inputHint,
                   hintStyle: TextStyle(color: Colors.grey[400]),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                   border: InputBorder.none,
                   suffixIcon: IconButton(
                     icon: Icon(
-                      _showEmoji
-                          ? Icons.keyboard
-                          : Icons.sentiment_satisfied_alt_rounded,
-                      color: _showEmoji
-                          ? const Color(0xFF2D6A4F)
-                          : Colors.grey[400],
+                      _showEmoji ? Icons.keyboard : Icons.sentiment_satisfied_alt_rounded,
+                      color: _showEmoji ? const Color(0xFF2D6A4F) : Colors.grey[400],
                     ),
                     onPressed: _toggleEmojiPicker,
                   ),
@@ -913,8 +945,7 @@ User Profile:
           GestureDetector(
             onTap: _isLoading ? null : _sendMessage,
             child: Container(
-              height: 55,
-              width:  55,
+              height: 55, width: 55,
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
                     colors: [Color(0xFF2D6A4F), Color(0xFF26A69A)],
@@ -922,17 +953,13 @@ User Profile:
                     end:   Alignment.bottomRight),
                 shape: BoxShape.circle,
                 boxShadow: [
-                  BoxShadow(
-                      color: const Color(0xFF2D6A4F).withOpacity(0.4),
-                      blurRadius: 10,
-                      offset: const Offset(0, 5)),
+                  BoxShadow(color: const Color(0xFF2D6A4F).withOpacity(0.4), blurRadius: 10, offset: const Offset(0, 5)),
                 ],
               ),
               child: _isLoading
                   ? const Padding(
                       padding: EdgeInsets.all(16),
-                      child: CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2),
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                     )
                   : const Icon(Icons.send_rounded, color: Colors.white, size: 24),
             ).animate(target: _isLoading ? 0 : 1).scale(duration: 200.ms),
@@ -944,7 +971,450 @@ User Profile:
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 📅  REMINDER BOTTOM SHEET
+// 📍  FIND ITEMS IN-CHAT CARD
+// Rendered directly inside the chat ListView as a bot message.
+// ═══════════════════════════════════════════════════════════════
+class _FindItemsChatCard extends StatefulWidget {
+  final _L                         l;
+  final bool                       loading;
+  final String?                    error;
+  final List<Map<String, dynamic>> items;
+  final DateTime                   time;
+  final void Function(String)      onItemTap;
+  final double                     fontSizeMultiplier;
+
+  const _FindItemsChatCard({
+    required this.l,
+    required this.loading,
+    required this.error,
+    required this.items,
+    required this.time,
+    required this.onItemTap,
+    required this.fontSizeMultiplier,
+  });
+
+  @override
+  State<_FindItemsChatCard> createState() => _FindItemsChatCardState();
+}
+
+class _FindItemsChatCardState extends State<_FindItemsChatCard> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _search = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final timeStr = DateFormat('h:mm a').format(widget.time);
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.92,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Card body ──
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: const BorderRadius.only(
+                  topLeft:     Radius.circular(20),
+                  topRight:    Radius.circular(20),
+                  bottomRight: Radius.circular(20),
+                  bottomLeft:  Radius.circular(4),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color:  Colors.black.withOpacity(0.07),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Header ──
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0xFF2D6A4F), Color(0xFF26A69A)],
+                        begin: Alignment.topLeft,
+                        end:   Alignment.centerRight,
+                      ),
+                      borderRadius: BorderRadius.only(
+                        topLeft:  Radius.circular(20),
+                        topRight: Radius.circular(20),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.location_on_rounded, color: Colors.white, size: 22),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.l.findCardTitle,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                widget.l.findCardSubtitle,
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // ── Content ──
+                  if (widget.loading)
+                    _buildLoadingState()
+                  else if (widget.error != null)
+                    _buildErrorState()
+                  else if (widget.items.isEmpty)
+                    _buildEmptyState()
+                  else
+                    _buildItemsList(),
+                ],
+              ),
+            ),
+
+            // ── Timestamp ──
+            Padding(
+              padding: const EdgeInsets.only(top: 6, left: 4),
+              child: Text(
+                timeStr,
+                style: TextStyle(
+                  fontSize: (11 * widget.fontSizeMultiplier).clamp(9.0, 14.0),
+                  color: Colors.grey[500],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ).animate().fadeIn(duration: 350.ms).slideY(begin: 0.15, curve: Curves.easeOut);
+  }
+
+  // ── Loading state ──────────────────────────────────────────
+  Widget _buildLoadingState() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+      child: Column(
+        children: [
+          const SizedBox(
+            width: 36,
+            height: 36,
+            child: CircularProgressIndicator(
+              color: Color(0xFF2D6A4F),
+              strokeWidth: 3,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            widget.l.findLoading,
+            style: const TextStyle(color: Colors.grey, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Error state ────────────────────────────────────────────
+  Widget _buildErrorState() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              widget.error!,
+              style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Empty state ────────────────────────────────────────────
+  Widget _buildEmptyState() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+      child: Column(
+        children: [
+          Icon(Icons.inventory_2_outlined, size: 48, color: Colors.grey[300]),
+          const SizedBox(height: 12),
+          Text(
+            widget.l.findEmpty,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey[400], fontSize: 13, height: 1.6),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Items list ─────────────────────────────────────────────
+  Widget _buildItemsList() {
+    final filtered = widget.items.where((item) {
+      final name = (item['object_name'] ?? item['identifier'] ?? '').toString().toLowerCase();
+      final loc  = (item['location'] ?? '').toString().toLowerCase();
+      final q    = _search.toLowerCase();
+      return name.contains(q) || loc.contains(q);
+    }).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Search bar
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+          child: TextField(
+            controller: _searchCtrl,
+            onChanged: (v) => setState(() => _search = v),
+            style: const TextStyle(fontSize: 14),
+            decoration: InputDecoration(
+              hintText:  widget.l.findSearchHint,
+              hintStyle: TextStyle(color: Colors.grey[400], fontSize: 13),
+              prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF2D6A4F), size: 18),
+              suffixIcon: _search.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear_rounded, size: 16, color: Colors.grey),
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        setState(() => _search = '');
+                      },
+                    )
+                  : null,
+              filled:    true,
+              fillColor: const Color(0xFFF4F7F5),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFF2D6A4F), width: 1.5)),
+            ),
+          ),
+        ),
+
+        // Item count label
+        if (_search.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(left: 16, bottom: 4),
+            child: Text(
+              '${widget.items.length} item${widget.items.length == 1 ? '' : 's'} saved',
+              style: TextStyle(fontSize: 11, color: Colors.grey[400], fontWeight: FontWeight.w500),
+            ),
+          ),
+
+        // No results
+        if (filtered.isEmpty && _search.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+            child: Row(
+              children: [
+                Icon(Icons.search_off_rounded, size: 20, color: Colors.grey[300]),
+                const SizedBox(width: 8),
+                Text(widget.l.findNoMatch,
+                    style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+              ],
+            ),
+          ),
+
+        // Items
+        ...filtered.asMap().entries.map((entry) {
+          final i    = entry.key;
+          final item = entry.value;
+
+          final rawName    = item['object_name'] ?? item['identifier'] ?? '';
+          final identifier = item['identifier']  ?? '';
+          final location   = item['location']    ?? 'Unknown';
+
+          // Display label: "black wallet" or just "wallet"
+          final displayName = identifier.isNotEmpty && identifier.toLowerCase() != rawName.toLowerCase()
+              ? '$identifier $rawName'
+              : rawName;
+
+          final isLast = i == filtered.length - 1;
+
+          return _ItemTile(
+            displayName: displayName,
+            location:    location,
+            isLast:      isLast,
+            onTap:       () => widget.onItemTap(displayName),
+          );
+        }),
+
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 📦 Single item tile inside the in-chat card
+// ─────────────────────────────────────────────────────────────
+class _ItemTile extends StatelessWidget {
+  final String       displayName;
+  final String       location;
+  final bool         isLast;
+  final VoidCallback onTap;
+
+  const _ItemTile({
+    required this.displayName,
+    required this.location,
+    required this.isLast,
+    required this.onTap,
+  });
+
+  // Pick a subtle icon based on common object names
+  IconData _iconFor(String name) {
+    final n = name.toLowerCase();
+    if (n.contains('glass') || n.contains('spectacle') || n.contains('चश्म')) {
+      return Icons.visibility_rounded;
+    }
+    if (n.contains('key') || n.contains('चाबी')) return Icons.vpn_key_rounded;
+    if (n.contains('phone') || n.contains('mobile') || n.contains('फ़ोन')) {
+      return Icons.smartphone_rounded;
+    }
+    if (n.contains('wallet') || n.contains('purse') || n.contains('बटुआ')) {
+      return Icons.account_balance_wallet_rounded;
+    }
+    if (n.contains('card') || n.contains('कार्ड')) return Icons.credit_card_rounded;
+    if (n.contains('medicine') || n.contains('tablet') || n.contains('दवा')) {
+      return Icons.medication_rounded;
+    }
+    if (n.contains('book') || n.contains('किताब')) return Icons.menu_book_rounded;
+    if (n.contains('watch') || n.contains('घड़ी')) return Icons.watch_rounded;
+    if (n.contains('bag') || n.contains('थैला')) return Icons.shopping_bag_rounded;
+    if (n.contains('remote') || n.contains('रिमोट')) return Icons.settings_remote_rounded;
+    return Icons.location_on_rounded;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        if (!isLast) // only draw divider if not last
+          Divider(height: 1, indent: 16, endIndent: 16, color: Colors.grey[100]),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  // Icon circle
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2D6A4F).withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      _iconFor(displayName),
+                      color: const Color(0xFF2D6A4F),
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // Name + location
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayName.isNotEmpty
+                              ? displayName[0].toUpperCase() + displayName.substring(1)
+                              : displayName,
+                          style: const TextStyle(
+                            color:      Color(0xFF1F2937),
+                            fontWeight: FontWeight.w600,
+                            fontSize:   14,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Icon(Icons.place_rounded, size: 12, color: Colors.grey[400]),
+                            const SizedBox(width: 3),
+                            Expanded(
+                              child: Text(
+                                location,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color:    Colors.grey[500],
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Tap indicator
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2D6A4F).withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      'Find',
+                      style: TextStyle(
+                        color:      Color(0xFF2D6A4F),
+                        fontSize:   11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// 📅  REMINDER BOTTOM SHEET  (unchanged from original)
 // ═══════════════════════════════════════════════════════════════
 class _ReminderSheet extends StatefulWidget {
   final _L      l;
@@ -1052,17 +1522,14 @@ class _ReminderSheetState extends State<_ReminderSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Handle bar
             Center(
               child: Container(
                 width: 40, height: 4,
                 decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(2)),
+                    color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
               ),
             ),
             const SizedBox(height: 20),
-
             Text(_l.reminderSheetTitle,
                 style: const TextStyle(
                     fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1F2937))),
@@ -1071,7 +1538,6 @@ class _ReminderSheetState extends State<_ReminderSheet> {
                 style: const TextStyle(fontSize: 13, color: Colors.grey)),
             const SizedBox(height: 24),
 
-            // Task input
             Text(_l.reminderTaskLabel,
                 style: const TextStyle(
                     fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF374151))),
@@ -1082,17 +1548,15 @@ class _ReminderSheetState extends State<_ReminderSheet> {
               decoration: InputDecoration(
                 hintText:  _l.reminderTaskHint,
                 hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
-                filled:     true,
-                fillColor:  const Color(0xFFF9FAFB),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                filled:    true,
+                fillColor: const Color(0xFFF9FAFB),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: BorderSide(color: Colors.grey[200]!)),
                 focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide:
-                        const BorderSide(color: Color(0xFF2D6A4F), width: 1.5)),
+                    borderSide: const BorderSide(color: Color(0xFF2D6A4F), width: 1.5)),
                 enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: BorderSide(color: Colors.grey[200]!)),
@@ -1100,7 +1564,6 @@ class _ReminderSheetState extends State<_ReminderSheet> {
             ),
             const SizedBox(height: 20),
 
-            // Date & Time
             Row(
               children: [
                 Expanded(
@@ -1124,7 +1587,6 @@ class _ReminderSheetState extends State<_ReminderSheet> {
             ),
             const SizedBox(height: 20),
 
-            // Repeat
             Text(_l.reminderRepeatLabel,
                 style: const TextStyle(
                     fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF374151))),
@@ -1139,9 +1601,7 @@ class _ReminderSheetState extends State<_ReminderSheet> {
                     duration: const Duration(milliseconds: 200),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
                     decoration: BoxDecoration(
-                      color: selected
-                          ? const Color(0xFF2D6A4F)
-                          : const Color(0xFFF3F4F6),
+                      color: selected ? const Color(0xFF2D6A4F) : const Color(0xFFF3F4F6),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
@@ -1158,7 +1618,6 @@ class _ReminderSheetState extends State<_ReminderSheet> {
             ),
             const SizedBox(height: 28),
 
-            // Confirm
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
@@ -1174,8 +1633,7 @@ class _ReminderSheetState extends State<_ReminderSheet> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF2D6A4F),
                   padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   elevation: 0,
                 ),
                 child: Text(
@@ -1193,7 +1651,7 @@ class _ReminderSheetState extends State<_ReminderSheet> {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Reusable picker tile
+// Reusable picker tile (used in reminder sheet)
 // ─────────────────────────────────────────────────────────────
 class _PickerTile extends StatelessWidget {
   final IconData     icon;
@@ -1243,164 +1701,6 @@ class _PickerTile extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 📍  FIND MY ITEM BOTTOM SHEET
-// ═══════════════════════════════════════════════════════════════
-class _FindItemSheet extends StatefulWidget {
-  final _L  l;
-  final List<Map<String, dynamic>> items;
-  final void Function(String objectName) onItemTap;
-
-  const _FindItemSheet({
-    required this.l,
-    required this.items,
-    required this.onItemTap,
-  });
-
-  @override
-  State<_FindItemSheet> createState() => _FindItemSheetState();
-}
-
-class _FindItemSheetState extends State<_FindItemSheet> {
-  String _search = '';
-  _L get _l => widget.l;
-
-  @override
-  Widget build(BuildContext context) {
-    final filtered = widget.items.where((item) {
-      final name =
-          (item['object_name'] ?? item['identifier'] ?? '').toString().toLowerCase();
-      return name.contains(_search.toLowerCase());
-    }).toList();
-
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.65,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Handle
-          Center(
-            child: Container(
-              width: 40, height: 4,
-              decoration: BoxDecoration(
-                  color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          Text(_l.findSheetTitle,
-              style: const TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1F2937))),
-          const SizedBox(height: 4),
-          Text(_l.findSheetSubtitle,
-              style: const TextStyle(fontSize: 13, color: Colors.grey)),
-          const SizedBox(height: 16),
-
-          // Search bar
-          TextField(
-            onChanged: (v) => setState(() => _search = v),
-            decoration: InputDecoration(
-              hintText:  _l.findSearchHint,
-              hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
-              prefixIcon: const Icon(Icons.search, color: Color(0xFF2D6A4F), size: 20),
-              filled:    true,
-              fillColor: const Color(0xFFF9FAFB),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: Colors.grey[200]!)),
-              enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: Colors.grey[200]!)),
-              focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide:
-                      const BorderSide(color: Color(0xFF2D6A4F), width: 1.5)),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Item list
-          Expanded(
-            child: filtered.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.search_off_rounded,
-                            size: 48, color: Colors.grey[300]),
-                        const SizedBox(height: 12),
-                        Text(
-                          widget.items.isEmpty ? _l.findEmpty : _l.findNoMatch,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey[400], fontSize: 14),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.separated(
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, __) =>
-                        Divider(height: 1, color: Colors.grey[100]),
-                    itemBuilder: (ctx, i) {
-                      final item       = filtered[i];
-                      final objectName =
-                          item['object_name'] ?? item['identifier'] ?? 'Item';
-                      final location   = item['location'] ?? 'Unknown location';
-                      final identifier = item['identifier'] ?? '';
-
-                      return ListTile(
-                        contentPadding:
-                            const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                        leading: Container(
-                          width: 44, height: 44,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF2D6A4F).withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(Icons.location_on_rounded,
-                              color: Color(0xFF2D6A4F), size: 22),
-                        ),
-                        title: Text(
-                          identifier.isNotEmpty
-                              ? '$identifier $objectName'
-                              : objectName,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 15,
-                              color: Color(0xFF1F2937)),
-                        ),
-                        subtitle: Padding(
-                          padding: const EdgeInsets.only(top: 3),
-                          child: Text(
-                            '📍 $location',
-                            style: const TextStyle(
-                                fontSize: 13, color: Color(0xFF6B7280)),
-                          ),
-                        ),
-                        trailing: const Icon(Icons.chevron_right_rounded,
-                            color: Color(0xFF2D6A4F)),
-                        onTap: () => widget.onItemTap(
-                          identifier.isNotEmpty
-                              ? '$identifier $objectName'
-                              : objectName,
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
       ),
     );
   }
