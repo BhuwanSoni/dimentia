@@ -225,11 +225,16 @@ def get_object_memories(user_id, object_name):
         if data.get("type") != "object_location":
             continue
 
-        stored_obj = data.get("object", "").lower()
+        # Support both 'object' (current key) and legacy 'object_name'
+        stored_obj = (data.get("object") or data.get("object_name") or "").lower()
 
         # 🔥 PARTIAL MATCH FIX
         if object_name in stored_obj or stored_obj in object_name:
-            results.append(data)
+            # Normalize to always return 'object_name' key so callers are consistent
+            result = dict(data)
+            if "object" in result and "object_name" not in result:
+                result["object_name"] = result["object"]
+            results.append(result)
 
     return results
 def get_all_memories(user_id):

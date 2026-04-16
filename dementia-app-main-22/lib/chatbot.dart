@@ -329,13 +329,15 @@ class _ChatScreenState extends State<ChatScreen> {
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
-          .collection('object_memories')
+          .collection('long_term_memory')
+          .where('type', isEqualTo: 'object_location')
           .get();
 
       final items = snapshot.docs.map((doc) {
         final data = doc.data();
         return <String, dynamic>{
-          'object_name': data['object_name'] ?? data['identifier'] ?? '',
+          // memory_service stores key as 'object'; support legacy 'object_name' too
+          'object_name': data['object'] ?? data['object_name'] ?? data['identifier'] ?? '',
           'identifier':  data['identifier']  ?? '',
           'location':    data['location']    ?? 'Unknown',
         };
@@ -393,14 +395,16 @@ class _ChatScreenState extends State<ChatScreen> {
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
-          .collection('object_memories')
+          .collection('long_term_memory')
+          .where('type', isEqualTo: 'object_location')
           .get();
       if (!mounted) return;
       setState(() {
         _storedItems = snapshot.docs.map((doc) {
           final data = doc.data();
           return <String, dynamic>{
-            'object_name': data['object_name'] ?? data['identifier'] ?? '',
+            // memory_service stores key as 'object'; support legacy 'object_name' too
+            'object_name': data['object'] ?? data['object_name'] ?? data['identifier'] ?? '',
             'identifier':  data['identifier']  ?? '',
             'location':    data['location']    ?? 'Unknown',
           };

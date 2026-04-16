@@ -140,7 +140,8 @@ def get_stored_items(user_id):
         docs = (
             db.collection("users")
               .document(user_id)
-              .collection("object_memories")
+              .collection("long_term_memory")
+              .where("type", "==", "object_location")
               .stream()
         )
         items = []
@@ -148,7 +149,8 @@ def get_stored_items(user_id):
             data = doc.to_dict()
             if data:
                 items.append({
-                    "object_name": data.get("object_name") or data.get("identifier", ""),
+                    # memory_service.py stores key as 'object'; support legacy 'object_name' too
+                    "object_name": data.get("object") or data.get("object_name") or data.get("identifier", ""),
                     "identifier":  data.get("identifier", ""),
                     "location":    data.get("location", "Unknown"),
                     "confidence":  data.get("confidence", 1),
@@ -685,7 +687,8 @@ def _full_fuzzy_scan(db, user_id, query):
         docs = (
             db.collection("users")
               .document(user_id)
-              .collection("object_memories")
+              .collection("long_term_memory")
+              .where("type", "==", "object_location")
               .stream()
         )
     except Exception as e:
@@ -699,7 +702,8 @@ def _full_fuzzy_scan(db, user_id, query):
             if not data:
                 continue
 
-            obj_name   = _normalize(data.get("object_name")  or data.get("identifier") or "")
+            # Support both 'object' (memory_service key) and legacy 'object_name'
+            obj_name   = _normalize(data.get("object") or data.get("object_name") or data.get("identifier") or "")
             identifier = _normalize(data.get("identifier")   or "")
             location   = _normalize(data.get("location")     or "")
             combined   = f"{obj_name} {identifier} {location}".strip()
@@ -708,14 +712,14 @@ def _full_fuzzy_scan(db, user_id, query):
 
             if hit:
                 results.append({
-                    "object_name": data.get("object_name") or data.get("identifier", ""),
+                    "object_name": data.get("object") or data.get("object_name") or data.get("identifier", ""),
                     "identifier":  data.get("identifier",  ""),
                     "location":    data.get("location",    "Unknown"),
                     "confidence":  data.get("confidence",  1),
                     "doc_id":      doc.id,
                 })
                 print(
-                    f"✅ Fuzzy match: '{data.get('object_name')}' / "
+                    f"✅ Fuzzy match: '{data.get('object') or data.get('object_name')}' / "
                     f"'{data.get('identifier')}' @ '{data.get('location')}'"
                 )
         except Exception as e:
@@ -837,7 +841,7 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
         except Exception as e:
             print(f"⚠️ store_memory error: {e}")
 
-        obj = memory_data.get("object_name") or memory_data.get("identifier", "item")
+        obj = memory_data.get("object") or memory_data.get("object_name") or memory_data.get("identifier", "item")
         loc = memory_data.get("location", "there")
 
         if lang in ["Hindi", "Hinglish"]:
