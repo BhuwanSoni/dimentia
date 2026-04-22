@@ -792,6 +792,9 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
     user_lower = user_message.lower().strip()
     risk_level = get_latest_risk_level(user_id)
 
+    # ── Reasoning trace — built up as we route through the function ──────────
+    reasoning_used = []
+
     # ==========================================================
     # 🔥 NATURAL LANGUAGE REMINDER
     # ==========================================================
@@ -812,6 +815,8 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
                 recurring_type="none",
                 user_timezone="Asia/Kolkata",
             )
+            reasoning_used.append("reminder_parser")
+            reasoning_used.append("rule")
             if lang in ["Hindi", "Hinglish"]:
                 reply_text = (
                     f"बिल्कुल! 😊 मैं आपको '{parsed['task']}' के लिए "
@@ -822,7 +827,7 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
                     f"Got it! 😊 I'll remind you about '{parsed['task']}' "
                     f"at {parsed['time_display']}. You can count on me!"
                 )
-            return {"reply": reply_text, "risk_level": risk_level}
+            return {"reply": reply_text, "risk_level": risk_level, "reasoning": ", ".join(reasoning_used)}
         except Exception as e:
             print(f"⚠️ create_reminder error: {e}")
 
@@ -843,6 +848,9 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
 
         obj = memory_data.get("object") or memory_data.get("object_name") or memory_data.get("identifier", "item")
         loc = memory_data.get("location", "there")
+
+        reasoning_used.append("memory_extractor")
+        reasoning_used.append("rule")
 
         if lang in ["Hindi", "Hinglish"]:
             confirm_reply = (
@@ -865,7 +873,7 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
         except Exception as e:
             print(f"⚠️ chat history write error (memory confirm): {e}")
 
-        return {"reply": confirm_reply, "risk_level": risk_level}
+        return {"reply": confirm_reply, "risk_level": risk_level, "reasoning": ", ".join(reasoning_used)}
 
     # ==========================================================
     # 2️⃣  Risk Level (re-fetch after memory ops)
@@ -1057,6 +1065,8 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
             except Exception as e:
                 print(f"⚠️ set_pending_object error: {e}")
 
+            reasoning_used.append("memory_retrieval")
+            reasoning_used.append("rule")
             if lang in ["Hindi", "Hinglish"]:
                 msg = f"मुझे आपके कई {object_name} मिले! 😊\n"
                 for mem in object_memories:
@@ -1071,7 +1081,7 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
                     label   = f"{id_part} {object_name}".strip() if id_part else object_name
                     msg    += f"• Your {label} is on the {mem['location']}.\n"
                 msg += "\nWhich one were you looking for?"
-            return {"reply": msg, "risk_level": risk_level}
+            return {"reply": msg, "risk_level": risk_level, "reasoning": ", ".join(reasoning_used)}
 
         elif len(object_memories) == 1:
             mem = object_memories[0]
@@ -1080,6 +1090,8 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
             except Exception as e:
                 print(f"⚠️ increment_memory_confidence error: {e}")
 
+            reasoning_used.append("memory_retrieval")
+            reasoning_used.append("rule")
             id_part      = _normalize(mem.get("identifier", ""))
             display_name = (
                 f"{id_part} {object_name}".strip()
@@ -1092,13 +1104,17 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
                 return {
                     "reply": f"मिल गया! 😊 आपका {display_name} {location} पर है। 💙",
                     "risk_level": risk_level,
+                    "reasoning": ", ".join(reasoning_used),
                 }
             return {
                 "reply": f"Found it! 😊 Your {display_name} is on the {location}. 💙",
                 "risk_level": risk_level,
+                "reasoning": ", ".join(reasoning_used),
             }
 
         else:
+            reasoning_used.append("memory_retrieval")
+            reasoning_used.append("rule")
             # Nothing found — guide user to tell us
             if lang in ["Hindi", "Hinglish"]:
                 reply_text = (
@@ -1115,7 +1131,7 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
                     f"I don't have a record of where your {object_name} is yet. "
                     f"Just tell me where it is and I'll keep track of it for you! 😊"
                 )
-            return {"reply": reply_text, "risk_level": risk_level}
+            return {"reply": reply_text, "risk_level": risk_level, "reasoning": ", ".join(reasoning_used)}
 
     # ==========================================================
     # 📋 LIST REMINDERS
@@ -1341,7 +1357,10 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
         return {"reply": reply_text, "risk_level": risk_level}
 
     # ==========================================================
-    # 🤖 GROQ LLM FALLBACK
+    # 🤖 GROQ LLM — Primary Intelligence
+    # Rules above handle structured intents (reminders, object lookup).
+    # Everything else goes here. LLM always receives full memory context
+    # so it acts as the brain, not a fallback.
     # ==========================================================
     history = get_conversation_history(user_id, limit=3)
 
@@ -1350,6 +1369,15 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
     except Exception as e:
         print(f"⚠️ get_all_memories error: {e}")
         long_term_memories = []
+
+    # Track what context layers the LLM will use
+    reasoning_used.append("llm")
+    if long_term_memories:
+        reasoning_used.append("memory")
+    if history:
+        reasoning_used.append("conversation_history")
+    if risk_level != "Low":
+        reasoning_used.append(f"risk_adaptation({risk_level})")
 
     system_prompt = build_system_prompt(risk_level)
 
@@ -1413,16 +1441,21 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
             return {
                 "reply": "ओह नहीं, अभी कनेक्शन में थोड़ी दिक्कत है। 😔 कृपया थोड़ी देर बाद फिर कोशिश करें!",
                 "risk_level": risk_level,
+                "reasoning": "llm_error, rule_fallback",
             }
         return {
             "reply": "Oh no, I'm having a little trouble connecting right now. 😔 Please try again in a moment!",
             "risk_level": risk_level,
+            "reasoning": "llm_error, rule_fallback",
         }
 
     reply = adapt_response_by_risk(raw_reply, risk_level)
 
     # ==========================================================
     # 💾 Store Chat History
+    # NOTE: Flutter's chatbot_service.dart also writes to Firestore.
+    # The backend write here is the authoritative record (assistant_reply key).
+    # Flutter write is kept for offline resilience — both use "assistant_reply".
     # ==========================================================
     try:
         db.collection("users").document(user_id).collection("chats").add({
@@ -1434,4 +1467,8 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
     except Exception as e:
         print(f"⚠️ chat history write error: {e}")
 
-    return {"reply": reply, "risk_level": risk_level}
+    return {
+        "reply":     reply,
+        "risk_level": risk_level,
+        "reasoning": ", ".join(reasoning_used),
+    }

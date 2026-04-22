@@ -18,7 +18,9 @@ class _AppDrawerState extends State<AppDrawer> {
   int _selectedIndex = 0;
 
   void _onItemTapped(int index, VoidCallback navigate) {
-    setState(() => _selectedIndex = index);
+    // ✅ FIX: Don't call setState here — the drawer is closing immediately,
+    // so the highlight rebuild is wasted work and contributes to flicker.
+    _selectedIndex = index;
     Navigator.pop(context);
     Future.delayed(const Duration(milliseconds: 200), navigate);
   }
@@ -76,83 +78,10 @@ class _AppDrawerState extends State<AppDrawer> {
                 const Divider(),
 
                 // ── Adjust Text Size (slider) ─────────────────────────────
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Label row with live percentage
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            l.adjustTextSize,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF004D40),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF2D6A4F).withOpacity(0.10),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              "${(settings.fontSizeMultiplier * 100).toStringAsFixed(0)}%",
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF2D6A4F),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 6),
-
-                      // Small / Large end-labels
-                      Row(
-                        children: [
-                          const Text("A",
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  color: Color(0xFF78909C))),
-                          Expanded(
-                            child: SliderTheme(
-                              data: SliderTheme.of(context).copyWith(
-                                activeTrackColor: const Color(0xFF2D6A4F),
-                                inactiveTrackColor:
-                                    const Color(0xFF2D6A4F).withOpacity(0.20),
-                                thumbColor: const Color(0xFF2D6A4F),
-                                overlayColor:
-                                    const Color(0xFF2D6A4F).withOpacity(0.12),
-                                trackHeight: 4,
-                                thumbShape: const RoundSliderThumbShape(
-                                    enabledThumbRadius: 8),
-                              ),
-                              child: Slider(
-                                value: settings.fontSizeMultiplier,
-                                min: 0.8,
-                                max: 1.6,
-                                divisions: 8,   // steps: 0.8 0.9 1.0 … 1.6
-                                onChanged: (v) =>
-                                    settings.updateFontSize(v),
-                              ),
-                            ),
-                          ),
-                          const Text("A",
-                              style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF78909C))),
-                        ],
-                      ),
-                    ],
-                  ),
+                _TextSizeSlider(
+                  label: l.adjustTextSize,
+                  initialValue: settings.fontSizeMultiplier,
+                  onChangeEnd: (v) => settings.updateFontSize(v),
                 ),
 
                 const Divider(),
@@ -243,6 +172,136 @@ class _AppDrawerState extends State<AppDrawer> {
       onTap: () => _onItemTapped(index, onTap),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
+      ),
+    );
+  }
+}
+
+// ── Text-size slider ──────────────────────────────────────────────────────────
+// Keeps slider value in LOCAL state so dragging never notifies SettingsProvider
+// (and never triggers a HomePage rebuild / flicker).  The provider is only
+// updated once, when the user lifts their finger (onChangeEnd).
+class _TextSizeSlider extends StatefulWidget {
+  final String label;
+  final double initialValue;
+  final ValueChanged<double> onChangeEnd;
+
+  const _TextSizeSlider({
+    required this.label,
+    required this.initialValue,
+    required this.onChangeEnd,
+  });
+
+  @override
+  State<_TextSizeSlider> createState() => _TextSizeSliderState();
+}
+
+class _TextSizeSliderState extends State<_TextSizeSlider> {
+  late double _localValue;
+
+  @override
+  void initState() {
+    super.initState();
+    _localValue = widget.initialValue;
+  }
+
+  // Keep in sync if the provider value changes from outside (e.g. Settings page)
+  @override
+  void didUpdateWidget(_TextSizeSlider old) {
+    super.didUpdateWidget(old);
+    if (old.initialValue != widget.initialValue) {
+      _localValue = widget.initialValue;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {},                    // block tap → no ListTile trigger
+      onHorizontalDragStart: (_) {},   // block drag → drawer stays open
+      onHorizontalDragUpdate: (_) {},
+      onHorizontalDragEnd: (_) {},
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Label row with live percentage
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  widget.label,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF004D40),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2D6A4F).withOpacity(0.10),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    "${(_localValue * 100).toStringAsFixed(0)}%",
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF2D6A4F),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 6),
+
+            // Small A / slider / Large A
+            Row(
+              children: [
+                const Text("A",
+                    style: TextStyle(fontSize: 12, color: Color(0xFF78909C))),
+                Expanded(
+                  child: GestureDetector(
+                    onHorizontalDragUpdate: (_) {}, // absorb so drawer stays open
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        activeTrackColor: const Color(0xFF2D6A4F),
+                        inactiveTrackColor:
+                            const Color(0xFF2D6A4F).withOpacity(0.20),
+                        thumbColor: const Color(0xFF2D6A4F),
+                        overlayColor:
+                            const Color(0xFF2D6A4F).withOpacity(0.12),
+                        trackHeight: 4,
+                        thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 8),
+                      ),
+                      child: Slider(
+                        value: _localValue,
+                        min: 0.8,
+                        max: 1.6,
+                        divisions: 8, // steps: 0.8 0.9 1.0 … 1.6
+                        // ✅ KEY FIX: Only update LOCAL state while dragging.
+                        // This rebuilds only this tiny widget, NOT HomePage.
+                        onChanged: (v) => setState(() => _localValue = v),
+                        // ✅ Commit to SettingsProvider ONCE when finger lifts.
+                        // Only now does HomePage get notified and rebuild.
+                        onChangeEnd: widget.onChangeEnd,
+                      ),
+                    ),
+                  ),
+                ),
+                const Text("A",
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF78909C))),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

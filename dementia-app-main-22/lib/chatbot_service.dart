@@ -59,16 +59,16 @@ class ChatbotService {
       final aiReply   = data["reply"]      ?? "I'm here for you.";
       final riskLevel = data["risk_level"] ?? "Unknown";
 
-      // ✅ Store chat history
+      // ✅ Store chat history (key must match get_conversation_history in backend)
       await _firestore
           .collection("users")
           .doc(uid)
           .collection("chats")
           .add({
-        "user_message": userMessage,
-        "ai_reply":     aiReply,
-        "risk_level":   riskLevel,
-        "timestamp":    FieldValue.serverTimestamp(),
+        "user_message":    userMessage,
+        "assistant_reply": aiReply,        // ✅ FIXED: was "ai_reply" — backend reads "assistant_reply"
+        "risk_level":      riskLevel,
+        "timestamp":       FieldValue.serverTimestamp(),
       });
 
       return aiReply;

@@ -85,7 +85,9 @@ class ReminderPage extends StatefulWidget {
 class _ReminderPageState extends State<ReminderPage> {
   final firestore = FirestoreService();
 
-  // Track already-scheduled doc IDs so we don't double-schedule
+  // Track already-scheduled doc IDs so we don't double-schedule.
+  // This is populated BEFORE the Firestore write in the dialog,
+  // so the stream listener sees it and skips the duplicate.
   final Set<String> _scheduledIds = {};
 
   // The ONLY function used to compute notification ID — for both scheduling
@@ -101,13 +103,22 @@ class _ReminderPageState extends State<ReminderPage> {
   void initState() {
     super.initState();
 
-    // Stream listener — catches new reminders added while app is open
+    // Stream listener — catches new reminders added while app is open.
+    //
+    // FIX: This is now the ONLY place that schedules notifications for
+    // newly added reminders. The dialog Save button no longer calls
+    // scheduleReminder() directly. Instead, it pre-registers the docId
+    // in _scheduledIds before writing to Firestore, so this listener
+    // skips it (the dialog already handled it). For reminders created
+    // elsewhere (e.g. another device), this listener catches them normally.
     _reminderSub = firestore.getReminders().listen((snapshot) async {
       if (!mounted) return;
       final userName = SettingsProvider.of(context).username;
       for (final change in snapshot.docChanges) {
         if (change.type != DocumentChangeType.added) continue;
         final docId = change.doc.id;
+
+        // Skip if already scheduled this session (dialog pre-registered it).
         if (_scheduledIds.contains(docId)) continue;
 
         final data = change.doc.data() as Map<String, dynamic>;
@@ -125,12 +136,6 @@ class _ReminderPageState extends State<ReminderPage> {
           continue;
         }
 
-        // ✅ FIX: In release builds, a tiny delay between Firestore write and
-        // this listener firing can make the time appear to be in the past.
-        // NotificationService.scheduleReminder() handles the clamp internally,
-        // so we REMOVE the hard skip here and let the service decide.
-        // Old code:  if (scheduledTime.isBefore(DateTime.now())) continue;
-
         _scheduledIds.add(docId);
         final title = data['task'] ?? data['title'] ?? 'Reminder';
         await NotificationService.scheduleReminder(
@@ -142,7 +147,7 @@ class _ReminderPageState extends State<ReminderPage> {
       }
     });
 
-    // ✅ Reschedule all future reminders on every app start.
+    // Reschedule all future reminders on every app start.
     // The stream above only catches NEW additions. If the app restarts,
     // all previously scheduled notifications are lost from the OS.
     // This restores them from Firestore on every launch.
@@ -151,7 +156,7 @@ class _ReminderPageState extends State<ReminderPage> {
     });
   }
 
-  // Load and reschedule all future reminders from Firestore
+  // Load and reschedule all future reminders from Firestore.
   Future<void> _loadAndScheduleExistingReminders() async {
     final snapshot = await firestore.getReminders().first;
     if (!mounted) return;
@@ -182,7 +187,7 @@ class _ReminderPageState extends State<ReminderPage> {
         continue;
       }
 
-      // Skip ones the stream already scheduled this session
+      // Skip ones already scheduled this session.
       if (_scheduledIds.contains(doc.id)) continue;
 
       _scheduledIds.add(doc.id);
@@ -338,18 +343,24 @@ class _ReminderPageState extends State<ReminderPage> {
 
                     Navigator.pop(context);
 
-                    // Save to Firestore
+                    // Save to Firestore — get the docRef first.
                     final docRef =
                         await firestore.addReminder(title, scheduledTime);
 
-                    // Schedule notification using the Firestore doc ID
-                    final userName =
-                        SettingsProvider.of(context).username;
-                    final notifId = _notificationIdFromDocId(docRef.id);
+                    // FIX: Pre-register the docId in _scheduledIds BEFORE
+                    // the stream listener fires. The Firestore onSnapshot
+                    // callback arrives almost immediately after the write,
+                    // sometimes before this line runs. By marking it here
+                    // we ensure the stream listener sees the id and skips it,
+                    // preventing a second scheduleReminder() call.
                     _scheduledIds.add(docRef.id);
 
+                    // Schedule the notification HERE (single source of truth
+                    // for reminders created from this device's dialog).
+                    final userName =
+                        SettingsProvider.of(context).username;
                     await NotificationService.scheduleReminder(
-                      id: notifId,
+                      id: _notificationIdFromDocId(docRef.id),
                       title: title,
                       scheduledTime: scheduledTime,
                       userName: userName,
@@ -401,8 +412,8 @@ class _ReminderPageState extends State<ReminderPage> {
     if (confirmed != true) return;
 
     await firestore.deleteReminder(reminder.id);
-    await NotificationService.cancelReminder(
-        _notificationIdFromDocId(reminder.id));
+    // Cancel original + all overdue follow-ups (ids: baseId, baseId+1..+3).
+    await NotificationService.markDone(_notificationIdFromDocId(reminder.id));
     _scheduledIds.remove(reminder.id);
   }
 
@@ -540,8 +551,14 @@ class _ReminderPageState extends State<ReminderPage> {
                     size: 28,
                   ),
                   onPressed: () async {
+                    // Mark done in Firestore.
                     await firestore.toggleComplete(
                         reminder.id, !reminder.isCompleted);
+                    // If completing, cancel all pending follow-ups.
+                    if (!reminder.isCompleted) {
+                      await NotificationService.markDone(
+                          _notificationIdFromDocId(reminder.id));
+                    }
                   },
                 ),
                 IconButton(
