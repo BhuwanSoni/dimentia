@@ -8,6 +8,7 @@ import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'settings_provider.dart';
 import 'chatbot_service.dart';
+import 'notification_service.dart'; // ✅ needed for direct scheduling from reminder sheet
 
 // ═══════════════════════════════════════════════════════════════
 // 🌐 MULTILINGUAL STRINGS  (English + Hindi)
@@ -464,27 +465,84 @@ User Profile:
         initialDate:      _reminderDate,
         initialTime:      _reminderTime,
         initialRecurring: _reminderRecurring,
-        onConfirm: (task, date, time, recurring) {
+        onConfirm: (task, date, time, recurring) async {
           Navigator.pop(ctx);
-          final h       = time.hour > 12 ? time.hour - 12 : (time.hour == 0 ? 12 : time.hour);
-          final m       = time.minute.toString().padLeft(2, '0');
-          final period  = time.hour >= 12 ? 'pm' : 'am';
-          final dateStr = '${date.day} ${_l.monthName(date.month)} ${date.year}';
-          final recurStr = recurring == 'none' ? '' : ' (recurring: $recurring)';
-          final message  = _l.reminderMsg(task, '$h:$m $period', dateStr, recurStr);
 
-          setState(() {
-            _showQuickChips = false;
-            messages.add({
-              'type':   _MessageType.text,
-              'sender': 'user',
-              'text':   message,
-              'time':   DateTime.now(),
+          final scheduledDateTime = DateTime(
+            date.year, date.month, date.day, time.hour, time.minute,
+          );
+
+          // ✅ FIX: Directly write to Firestore instead of sending a natural
+          // language message to the AI. The old approach was fragile — it
+          // relied on the AI correctly parsing the message AND calling the
+          // right backend tool. Now we write directly and show the user
+          // a confirmation message in chat ourselves.
+          try {
+            final uid = user?.uid;
+            if (uid == null) throw Exception('Not logged in');
+
+            final docRef = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(uid)
+                .collection('reminders')
+                .add({
+              'title': task,
+              'task': task,
+              'time': Timestamp.fromDate(scheduledDateTime.toUtc()),
+              'scheduled_time': Timestamp.fromDate(scheduledDateTime.toUtc()),
+              'completed': false,
+              'source': 'assistant_sheet',
+              'recurring_type': recurring,
+              'time_text': DateFormat('hh:mm a').format(scheduledDateTime),
             });
-            _isLoading = true;
-          });
-          _scrollToBottom();
-          _sendDirectMessage(message);
+
+            // Schedule the local notification immediately — don't wait for
+            // the stream listener, which may be on another page.
+            final settings = SettingsProvider.of(context);
+            await NotificationService.scheduleReminder(
+              id: docRef.id.hashCode.abs() % 2147483647,
+              title: task,
+              scheduledTime: scheduledDateTime,
+              userName: settings.username,
+            );
+
+            final h      = time.hour > 12 ? time.hour - 12 : (time.hour == 0 ? 12 : time.hour);
+            final m      = time.minute.toString().padLeft(2, '0');
+            final period = time.hour >= 12 ? 'pm' : 'am';
+            final dateStr = '${date.day} ${_l.monthName(date.month)} ${date.year}';
+            final recurStr = recurring == 'none' ? '' : ' (${recurring})';
+
+            if (!mounted) return;
+            setState(() {
+              _showQuickChips = false;
+              messages.add({
+                'type':   _MessageType.text,
+                'sender': 'user',
+                'text':   _l.reminderMsg(task, '$h:$m $period', dateStr, recurStr),
+                'time':   DateTime.now(),
+              });
+              messages.add({
+                'type':   _MessageType.text,
+                'sender': 'bot',
+                'text':   _isHindi
+                    ? '✅ रिमाइंडर सेट हो गया! मैं आपको "$task" के लिए $h:$m $period$recurStr याद दिलाऊंगा। 😊'
+                    : '✅ Done! I\'ve set a reminder for "$task" at $h:$m $period on $dateStr$recurStr. 😊',
+                'time':   DateTime.now(),
+              });
+            });
+            _scrollToBottom();
+          } catch (e) {
+            if (!mounted) return;
+            setState(() {
+              _isLoading = false;
+              messages.add({
+                'type':   _MessageType.text,
+                'sender': 'bot',
+                'text':   _l.errorDirectMsg,
+                'time':   DateTime.now(),
+              });
+            });
+          }
         },
       ),
     );

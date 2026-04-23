@@ -206,6 +206,7 @@ def complete_reminder(user_id, reminder_id):
         .document(reminder_id) \
         .update({
             "completed": True,
+            "completed_at": firestore.SERVER_TIMESTAMP,  # ✅ lets Flutter stream detect exact completion time
             "last_modified": firestore.SERVER_TIMESTAMP
         })
 
