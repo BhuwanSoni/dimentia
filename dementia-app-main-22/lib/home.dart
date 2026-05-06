@@ -400,7 +400,22 @@ class _HomePageState extends State<HomePage> {
     _aiLoading.value = true;
 
     try {
-      final String? response = await _chatbotService.sendMessage(userMessage);
+      // ✅ FIX: pass the SAME full profileText that the chat screen sends so
+      // the backend reminder parser has identical context in both code paths.
+      // Without this, voice reminders silently failed (backend got no user_id
+      // context and couldn't parse timezone / name correctly).
+      final settings = SettingsProvider.of(context);
+      final String? response = await _chatbotService.sendMessage(
+        userMessage,
+        profileText: '''
+User Profile:
+- Name: ${settings.username.isNotEmpty ? settings.username : 'Not specified'}
+- Gender: ${settings.gender.isNotEmpty ? settings.gender : 'Not specified'}
+- Age: ${settings.age > 0 ? '${settings.age} years' : 'Not specified'}
+- Address: ${settings.address.isNotEmpty ? settings.address : 'Not specified'}
+- Language: English
+''',
+      );
       final String answer = (response != null && response.trim().isNotEmpty)
           ? response.trim()
           : "I'm sorry, I didn't quite catch that. Could you say that again?";

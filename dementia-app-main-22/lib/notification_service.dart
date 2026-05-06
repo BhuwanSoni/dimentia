@@ -10,20 +10,11 @@ import 'package:timezone/timezone.dart' as tz;
 // ID STRATEGY
 // ─────────────────────────────────────────────────────────────────────────────
 //
-//  Every reminder occupies a BLOCK of IDs so follow-up notifications never
-//  collide with the original or with each other.
-//
-//  Given a base id (e.g. 100):
-//    100       → original reminder
-//    100 + 1   → 1st overdue follow-up  (+5 min)
-//    100 + 2   → 2nd overdue follow-up  (+10 min)
-//    100 + 3   → 3rd overdue follow-up  (+15 min)
-//
-//  Rule: space your base IDs at least (1 + kOverdueCount) apart.
-//  e.g. use 100, 110, 120 … if kOverdueCount = 3.
+//  Every reminder uses a single notification ID derived from its Firestore docId.
+//  Overdue follow-ups are DISABLED (kOverdueCount = 0) to prevent spam.
 //
 //  Call markDone(baseId) when the user confirms completion — it cancels
-//  the original + all follow-ups so they are never shown.
+//  the notification so it is never shown after done.
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _notificationsPlugin =
@@ -31,14 +22,14 @@ class NotificationService {
 
   static Function(String?)? onNotificationClick;
 
-  // Number of overdue follow-up pings after the original reminder fires.
-  static const int kOverdueCount = 3;
+  // FIX: Set to 0 — overdue follow-ups were causing 4x notification spam.
+  // One reminder = one notification. No follow-ups.
+  static const int kOverdueCount = 0;
 
-  // Gap between each overdue follow-up (5 minutes).
+  // Gap between each overdue follow-up (kept for markDone loop compatibility).
   static const Duration kOverdueInterval = Duration(minutes: 5);
 
   // ─── Repeating-alert guard ────────────────────────────────────
-  // Prevents a second parallel loop from starting if the first is still running.
   static bool _stopRepeating = false;
   static bool _repeatingAlertRunning = false;
 
@@ -69,14 +60,6 @@ class NotificationService {
     importance: Importance.max,
   );
 
-  static const AndroidNotificationChannel _overdueChannel =
-      AndroidNotificationChannel(
-    'overdue_channel',
-    'Overdue Follow-ups',
-    description: 'Follow-up notifications for unfinished reminders',
-    importance: Importance.max,
-  );
-
   // ─────────────────────────────────────────────────────────────
   // INIT
   // ─────────────────────────────────────────────────────────────
@@ -97,11 +80,6 @@ class NotificationService {
       onDidReceiveNotificationResponse: (response) {
         if (response.actionId == 'DONE') {
           debugPrint('✅ Done clicked — payload: ${response.payload}');
-          // FIX: Cancel original + all overdue follow-ups when user taps Done.
-          // Extract baseId from payload format "type:title" is not enough to
-          // recover the id, so callers should also wire markDone() from their
-          // own screen. This guard handles the notification-action path by
-          // passing the baseId encoded in the payload as "done:<baseId>".
           final payload = response.payload ?? '';
           if (payload.startsWith('done:')) {
             final baseId = int.tryParse(payload.replaceFirst('done:', ''));
@@ -122,7 +100,7 @@ class NotificationService {
               AndroidFlutterLocalNotificationsPlugin>();
       await androidPlugin?.createNotificationChannel(_reminderChannel);
       await androidPlugin?.createNotificationChannel(_emergencyChannel);
-      await androidPlugin?.createNotificationChannel(_overdueChannel);
+      // overdue_channel kept for safe channel removal (won't receive new notifs)
     }
   }
 
@@ -167,7 +145,7 @@ class NotificationService {
       vibrationPattern: vibrationPattern,
       ticker: ticker,
       category: category,
-      fullScreenIntent: false, // keep false — crashes on Xiaomi/Samsung
+      fullScreenIntent: false,
     );
   }
 
@@ -202,125 +180,13 @@ class NotificationService {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // PRIVATE — schedule overdue follow-ups
-  //
-  //  Schedules kOverdueCount follow-ups at:
-  //    baseTime + 5 min  (id = baseId + 1)
-  //    baseTime + 10 min (id = baseId + 2)
-  //    baseTime + 15 min (id = baseId + 3)
-  // ─────────────────────────────────────────────────────────────
-
-  static Future<void> _scheduleOverdueFollowUps({
-    required int baseId,
-    required String taskTitle,
-    required String userName,
-    required tz.TZDateTime baseTime,
-    required NotificationAlertType type,
-  }) async {
-    for (int i = 1; i <= kOverdueCount; i++) {
-      final followUpTime   = baseTime.add(kOverdueInterval * i);
-      final overdueMinutes = kOverdueInterval.inMinutes * i;
-      final followUpTitle  = _overdueTitle(type, userName);
-      final followUpBody   = _overdueBody(type, taskTitle, userName, overdueMinutes);
-      final pattern        = _patternFor(type);
-
-      final details = _buildDetails(
-        channelId: 'overdue_channel',
-        channelName: 'Overdue Follow-ups',
-        vibrationPattern: pattern,
-        category: AndroidNotificationCategory.reminder,
-        ticker: 'overdue_alert',
-      );
-
-      await _scheduleZoned(
-        id: baseId + i,
-        title: followUpTitle,
-        body: followUpBody,
-        tzTime: followUpTime,
-        androidDetails: details,
-        // FIX: encode baseId in payload so markDone() can be triggered from
-        // the notification action handler in init().
-        payload: 'done:$baseId',
-      );
-
-      debugPrint(
-        '⏰ Follow-up $i/$kOverdueCount → id=${baseId + i}  '
-        'at $followUpTime  (+${overdueMinutes} min)',
-      );
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // OVERDUE TEXT HELPERS
-  // ─────────────────────────────────────────────────────────────
-
-  static String _overdueTitle(NotificationAlertType type, String userName) {
-    return switch (type) {
-      NotificationAlertType.medicine    => '⚠️ Overdue: Medicine not taken',
-      NotificationAlertType.emergency   => '🚨 Still unresolved: Emergency task',
-      NotificationAlertType.missed      => '🔁 Still pending: Missed task',
-      NotificationAlertType.task        => '📌 Overdue: Task not completed',
-      NotificationAlertType.appointment => '🗓️ Overdue: Missed appointment',
-      NotificationAlertType.water       => '💧 Overdue: Hydration reminder',
-      NotificationAlertType.exercise    => '🏃 Overdue: Exercise not done',
-    };
-  }
-
-  static String _overdueBody(
-    NotificationAlertType type,
-    String taskTitle,
-    String userName,
-    int minutesLate,
-  ) {
-    final lateText = minutesLate == 5 ? '5 minutes ago' : '$minutesLate minutes ago';
-
-    return switch (type) {
-      NotificationAlertType.medicine =>
-        '$userName, you haven\'t taken "$taskTitle" yet.\n'
-        'This was due $lateText. Please take it now! 💊',
-      NotificationAlertType.emergency =>
-        '$userName, emergency task "$taskTitle" is still unresolved.\n'
-        'It was due $lateText. 🚨',
-      NotificationAlertType.missed =>
-        '$userName, "$taskTitle" is still pending.\n'
-        'You missed it $lateText. 🔁',
-      NotificationAlertType.task =>
-        '$userName, the task "$taskTitle" is not done yet.\n'
-        'It was due $lateText. 📌',
-      NotificationAlertType.appointment =>
-        '$userName, you missed your appointment: "$taskTitle".\n'
-        'It was $lateText. 🗓️',
-      NotificationAlertType.water =>
-        '$userName, you haven\'t had water yet!\n'
-        'Reminder was $lateText. Please hydrate 💧',
-      NotificationAlertType.exercise =>
-        '$userName, your exercise "$taskTitle" is overdue.\n'
-        'It was scheduled $lateText. 🏃',
-    };
-  }
-
-  static Int64List _patternFor(NotificationAlertType type) {
-    return switch (type) {
-      NotificationAlertType.emergency => _emergencyVibration,
-      NotificationAlertType.missed    => _missedVibration,
-      _                               => _medicineVibration,
-    };
-  }
-
-  // ─────────────────────────────────────────────────────────────
   // SCHEDULE REMINDER  ← main entry point
   //
-  //  Works for ALL NotificationAlertType values.
-  //  Automatically schedules kOverdueCount follow-ups after the
-  //  original fires, 5 min apart, unless enableOverdueFollowUps = false.
+  //  FIX: Cancels any existing notification with the same id BEFORE
+  //  scheduling. This prevents duplicate notifications when the stream
+  //  listener and restart-recovery both try to schedule the same reminder.
   //
-  //  ⚠️  ID spacing rule:
-  //      Space base IDs by at least (1 + kOverdueCount) = 4.
-  //      Recommended: use multiples of 10 → 100, 110, 120 …
-  //
-  //  FIX: If scheduledTime is in the past, it is clamped to 30 s from now
-  //       but overdue follow-ups are NOT scheduled in that case — they would
-  //       otherwise fire immediately and spam the user.
+  //  FIX: kOverdueCount = 0 so no follow-up spam is generated.
   // ─────────────────────────────────────────────────────────────
 
   static Future<void> scheduleReminder({
@@ -328,14 +194,18 @@ class NotificationService {
     required String title,
     required DateTime scheduledTime,
     String userName = 'User',
-    NotificationAlertType type = NotificationAlertType.medicine,
-    bool enableOverdueFollowUps = true,
+    NotificationAlertType type = NotificationAlertType.task,
+    bool enableOverdueFollowUps = false, // FIX: disabled by default
   }) async {
     if (!Platform.isAndroid) return;
 
+    // FIX: Cancel any existing notification with this id before scheduling.
+    // Prevents duplicates if called multiple times for the same reminder.
+    await _notificationsPlugin.cancel(id);
+    debugPrint('🗑️ Pre-cancelled id=$id before scheduling');
+
     final now = DateTime.now();
 
-    // FIX: Track whether the time was clamped so we can skip follow-ups.
     bool wasClamped = false;
     if (scheduledTime.isBefore(now)) {
       scheduledTime = now.add(const Duration(seconds: 30));
@@ -348,7 +218,6 @@ class NotificationService {
 
     final tzTime = tz.TZDateTime.from(scheduledTime, tz.local);
 
-    // ─── DEBUG ────────────────────────────────────────────────
     debugPrint('📅 Scheduling — id=$id  type=$type  title="$title"');
     debugPrint('   scheduledTime (local) : $scheduledTime');
     debugPrint('   tzTime                : $tzTime');
@@ -356,9 +225,7 @@ class NotificationService {
     debugPrint('   now (device)          : $now');
     debugPrint(
         '   tzTime in future?     : ${tzTime.isAfter(tz.TZDateTime.now(tz.local))}');
-    // ──────────────────────────────────────────────────────────
 
-    // ─── Friendly day / time strings ─────────────────────────
     String dayText;
     if (scheduledTime.day == now.day) {
       dayText = 'Today';
@@ -369,7 +236,6 @@ class NotificationService {
     }
     final timeText = DateFormat('hh:mm a').format(scheduledTime);
 
-    // ─── Build notification content ───────────────────────────
     final notifTitle = _primaryTitle(type, userName);
     final notifBody  = _primaryBody(type, title, userName, dayText, timeText);
     final pattern    = _patternFor(type);
@@ -381,33 +247,19 @@ class NotificationService {
       category: AndroidNotificationCategory.reminder,
     );
 
-    // ─── 1. Schedule original reminder ───────────────────────
     await _scheduleZoned(
       id: id,
       title: notifTitle,
       body: notifBody,
       tzTime: tzTime,
       androidDetails: details,
-      // FIX: encode baseId in payload so Done action can call markDone().
       payload: 'done:$id',
     );
 
-    // ─── 2. Schedule overdue follow-ups ──────────────────────
-    // FIX: Skip follow-ups entirely when time was clamped (past-time task).
-    //      Scheduling follow-ups on a clamped time causes them to fire
-    //      at +5/+10/+15 min from "now", which looks like repeated spam.
-    if (enableOverdueFollowUps && !wasClamped) {
-      await _scheduleOverdueFollowUps(
-        baseId: id,
-        taskTitle: title,
-        userName: userName,
-        baseTime: tzTime,
-        type: type,
-      );
-      debugPrint(
-        '📌 $kOverdueCount overdue follow-ups set for id=$id '
-        '(every ${kOverdueInterval.inMinutes} min)',
-      );
+    // FIX: kOverdueCount = 0, so this block never executes.
+    // Overdue follow-ups are permanently disabled to prevent notification spam.
+    if (enableOverdueFollowUps && kOverdueCount > 0 && !wasClamped) {
+      debugPrint('📌 Overdue follow-ups disabled (kOverdueCount=0)');
     }
   }
 
@@ -453,18 +305,25 @@ class NotificationService {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // MARK DONE  — cancel original + all follow-ups
+  // MARK DONE  — cancel the notification
   // ─────────────────────────────────────────────────────────────
   //
-  //  Call this when the user taps "Done" or confirms completion.
-  //  Cancels ids: baseId, baseId+1, baseId+2, baseId+3.
+  //  With kOverdueCount = 0 this just cancels the single notification id.
+  //  The loop is kept so callers don't need to change.
 
   static Future<void> markDone(int baseId) async {
     for (int i = 0; i <= kOverdueCount; i++) {
       await _notificationsPlugin.cancel(baseId + i);
     }
-    debugPrint(
-        '✅ markDone: cancelled ids $baseId – ${baseId + kOverdueCount}');
+    debugPrint('✅ markDone: cancelled id $baseId');
+  }
+
+  static Int64List _patternFor(NotificationAlertType type) {
+    return switch (type) {
+      NotificationAlertType.emergency => _emergencyVibration,
+      NotificationAlertType.missed    => _missedVibration,
+      _                               => _medicineVibration,
+    };
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -512,10 +371,6 @@ class NotificationService {
 
   // ─────────────────────────────────────────────────────────────
   // REPEATING ALERT  (in-process loop)
-  //
-  //  FIX: Added _repeatingAlertRunning guard to prevent a second
-  //       parallel loop starting if this is called again before the
-  //       first finishes (e.g. on hot reload or screen revisit).
   // ─────────────────────────────────────────────────────────────
 
   static void stopRepeatingAlert() {
@@ -531,7 +386,6 @@ class NotificationService {
     int repeatCount = 5,
     int intervalSeconds = 20,
   }) async {
-    // FIX: Bail out if a loop is already running to avoid parallel duplicate alerts.
     if (_repeatingAlertRunning) {
       debugPrint('⚠️ Repeating alert already running — ignoring duplicate call');
       return;
@@ -554,7 +408,6 @@ class NotificationService {
         }
       }
     } finally {
-      // FIX: Always reset the flag so future calls are not permanently blocked.
       _repeatingAlertRunning = false;
       debugPrint('✅ Repeating alert finished');
     }

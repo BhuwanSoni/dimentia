@@ -51,24 +51,10 @@ class FirestoreService {
   }
 
   Stream<QuerySnapshot> getReminders() {
-    // Returns ALL reminders (active + completed), ordered by time.
-    // The UI separates them visually. We keep completed ones visible
-    // so users can see their history and un-complete if needed.
     return _db
         .collection('users')
         .doc(userId)
         .collection('reminders')
-        .orderBy('time')
-        .snapshots();
-  }
-
-  // Returns only incomplete reminders (used for notification scheduling).
-  Stream<QuerySnapshot> getActiveReminders() {
-    return _db
-        .collection('users')
-        .doc(userId)
-        .collection('reminders')
-        .where('completed', isEqualTo: false)
         .orderBy('time')
         .snapshots();
   }
@@ -126,14 +112,12 @@ class ReminderPage extends StatefulWidget {
 class _ReminderPageState extends State<ReminderPage> {
   final firestore = FirestoreService();
 
-  // Track already-scheduled doc IDs so we don't double-schedule.
-  // This is populated BEFORE the Firestore write in the dialog,
-  // so the stream listener sees it and skips the duplicate.
+  // Track already-scheduled doc IDs within this session.
+  // Guards against duplicate scheduling if Firestore re-emits an 'added'
+  // event (e.g. after app lifecycle changes or stream reconnection).
   final Set<String> _scheduledIds = {};
 
-  // The ONLY function used to compute notification ID — for both scheduling
-  // and cancelling. Using any other source means cancel can never find
-  // the notification that was scheduled.
+  // Single source of truth for computing notification ID.
   int _notificationIdFromDocId(String docId) {
     return docId.hashCode.abs() % 2147483647;
   }
@@ -144,14 +128,18 @@ class _ReminderPageState extends State<ReminderPage> {
   void initState() {
     super.initState();
 
-    // Stream listener — catches new reminders added while app is open.
+    // ─────────────────────────────────────────────────────────────
+    // FIX: The Firestore stream is the ONLY place that schedules
+    // notifications. It handles ALL reminder sources:
+    //   • Manual reminders added from this device's dialog
+    //   • Voice/assistant reminders written by the Python backend
+    //   • Reminders added from another device
     //
-    // FIX: This is now the ONLY place that schedules notifications for
-    // newly added reminders. The dialog Save button no longer calls
-    // scheduleReminder() directly. Instead, it pre-registers the docId
-    // in _scheduledIds before writing to Firestore, so this listener
-    // skips it (the dialog already handled it). For reminders created
-    // elsewhere (e.g. another device), this listener catches them normally.
+    // FIX REMOVED: _loadAndScheduleExistingReminders() on app restart.
+    // Android OS persists scheduled notifications across restarts.
+    // Re-scheduling on every restart was the primary cause of duplicate
+    // and ghost notifications.
+    // ─────────────────────────────────────────────────────────────
     _reminderSub = firestore.getReminders().listen((snapshot) async {
       if (!mounted) return;
       final userName = SettingsProvider.of(context).username;
@@ -159,8 +147,11 @@ class _ReminderPageState extends State<ReminderPage> {
         final docId = change.doc.id;
         final data = change.doc.data() as Map<String, dynamic>;
 
-        // ✅ FIX: Handle modifications — if a reminder is marked completed
-        // (e.g. by the Python backend or another device), cancel its notifications.
+        debugPrint('STREAM EVENT: ${change.type} $docId');
+
+        // Handle modifications — if a reminder is marked completed
+        // (by the Python backend, voice command, or another device),
+        // cancel its notification immediately.
         if (change.type == DocumentChangeType.modified) {
           final isCompleted = data['completed'] == true;
           if (isCompleted) {
@@ -172,8 +163,12 @@ class _ReminderPageState extends State<ReminderPage> {
 
         if (change.type != DocumentChangeType.added) continue;
 
-        // Skip if already scheduled this session (dialog pre-registered it).
+        // Skip if already scheduled this session (prevents double-scheduling
+        // on stream re-emissions, e.g. after app lifecycle changes).
         if (_scheduledIds.contains(docId)) continue;
+
+        // Skip if already completed — no notification needed.
+        if (data['completed'] == true) continue;
 
         final rawTime = data['scheduled_time'] ?? data['time'];
         if (rawTime == null) continue;
@@ -189,9 +184,11 @@ class _ReminderPageState extends State<ReminderPage> {
           continue;
         }
 
-        // ✅ FIX: Skip if already completed — don't schedule notifications
-        // for reminders that arrive from the backend already completed.
-        if (data['completed'] == true) continue;
+        // Skip reminders more than 1 minute in the past — nothing to schedule.
+        if (scheduledTime
+            .isBefore(DateTime.now().subtract(const Duration(minutes: 1)))) {
+          continue;
+        }
 
         _scheduledIds.add(docId);
         final title = data['task'] ?? data['title'] ?? 'Reminder';
@@ -200,66 +197,12 @@ class _ReminderPageState extends State<ReminderPage> {
           title: title,
           scheduledTime: scheduledTime,
           userName: userName,
+          type: NotificationAlertType.task,
         );
+
+        debugPrint('🔔 Scheduled reminder: $title ($docId)');
       }
     });
-
-    // Reschedule all future reminders on every app start.
-    // The stream above only catches NEW additions. If the app restarts,
-    // all previously scheduled notifications are lost from the OS.
-    // This restores them from Firestore on every launch.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadAndScheduleExistingReminders();
-    });
-  }
-
-  // Load and reschedule all future reminders from Firestore.
-  Future<void> _loadAndScheduleExistingReminders() async {
-    final snapshot = await firestore.getReminders().first;
-    if (!mounted) return;
-
-    final userName = SettingsProvider.of(context).username;
-
-    for (final doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-
-      // ✅ FIX: Never reschedule completed reminders on app restart.
-      if (data['completed'] == true) continue;
-
-      final rawTime = data['scheduled_time'] ?? data['time'];
-      if (rawTime == null) continue;
-
-      DateTime scheduledTime;
-      if (rawTime is Timestamp) {
-        scheduledTime = rawTime.toDate().toLocal();
-      } else if (rawTime is String) {
-        final parsed = DateTime.tryParse(rawTime);
-        if (parsed == null) continue;
-        scheduledTime = parsed.isUtc ? parsed.toLocal() : parsed;
-      } else {
-        continue;
-      }
-
-      // Skip clearly old reminders (more than 1 minute in the past)
-      // — nothing useful to schedule for them.
-      if (scheduledTime
-          .isBefore(DateTime.now().subtract(const Duration(minutes: 1)))) {
-        continue;
-      }
-
-      // Skip ones already scheduled this session.
-      if (_scheduledIds.contains(doc.id)) continue;
-
-      _scheduledIds.add(doc.id);
-
-      final title = data['task'] ?? data['title'] ?? 'Reminder';
-      await NotificationService.scheduleReminder(
-        id: _notificationIdFromDocId(doc.id),
-        title: title,
-        scheduledTime: scheduledTime,
-        userName: userName,
-      );
-    }
   }
 
   @override
@@ -403,28 +346,10 @@ class _ReminderPageState extends State<ReminderPage> {
 
                     Navigator.pop(context);
 
-                    // Save to Firestore — get the docRef first.
-                    final docRef =
-                        await firestore.addReminder(title, scheduledTime);
-
-                    // FIX: Pre-register the docId in _scheduledIds BEFORE
-                    // the stream listener fires. The Firestore onSnapshot
-                    // callback arrives almost immediately after the write,
-                    // sometimes before this line runs. By marking it here
-                    // we ensure the stream listener sees the id and skips it,
-                    // preventing a second scheduleReminder() call.
-                    _scheduledIds.add(docRef.id);
-
-                    // Schedule the notification HERE (single source of truth
-                    // for reminders created from this device's dialog).
-                    final userName =
-                        SettingsProvider.of(context).username;
-                    await NotificationService.scheduleReminder(
-                      id: _notificationIdFromDocId(docRef.id),
-                      title: title,
-                      scheduledTime: scheduledTime,
-                      userName: userName,
-                    );
+                    // Firestore is the ONLY source of truth.
+                    // The stream listener will pick up this new document
+                    // and schedule the notification — no need to do it here.
+                    await firestore.addReminder(title, scheduledTime);
 
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -472,7 +397,6 @@ class _ReminderPageState extends State<ReminderPage> {
     if (confirmed != true) return;
 
     await firestore.deleteReminder(reminder.id);
-    // Cancel original + all overdue follow-ups (ids: baseId, baseId+1..+3).
     await NotificationService.markDone(_notificationIdFromDocId(reminder.id));
     _scheduledIds.remove(reminder.id);
   }
@@ -612,15 +536,11 @@ class _ReminderPageState extends State<ReminderPage> {
                   ),
                   onPressed: () async {
                     final completing = !reminder.isCompleted;
-                    // Mark done in Firestore.
                     await firestore.toggleComplete(reminder.id, completing);
 
                     final notifId = _notificationIdFromDocId(reminder.id);
                     if (completing) {
-                      // ✅ FIX: Always cancel original + ALL overdue follow-ups
-                      // (ids baseId..baseId+kOverdueCount) when user completes.
-                      // This handles both: user completes before notification fires,
-                      // or after it fired but follow-ups are still pending.
+                      // Cancel notification immediately when user marks done.
                       await NotificationService.markDone(notifId);
                       _scheduledIds.remove(reminder.id);
                     } else {
@@ -629,12 +549,12 @@ class _ReminderPageState extends State<ReminderPage> {
                       if (scheduledTime != null &&
                           scheduledTime.isAfter(DateTime.now())) {
                         final userName = SettingsProvider.of(context).username;
-                        _scheduledIds.add(reminder.id);
                         await NotificationService.scheduleReminder(
                           id: notifId,
                           title: reminder.title,
                           scheduledTime: scheduledTime,
                           userName: userName,
+                          type: NotificationAlertType.task,
                         );
                       }
                     }
@@ -670,7 +590,6 @@ class _ReminderPageState extends State<ReminderPage> {
         backgroundColor: const Color(0xFF2D6A4F),
         iconTheme: const IconThemeData(color: Colors.white),
         elevation: 0,
-        // DEBUG BUTTON — remove after confirming notifications work
         actions: [
           IconButton(
             icon: const Icon(Icons.bug_report_outlined),

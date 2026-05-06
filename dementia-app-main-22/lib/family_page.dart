@@ -1,29 +1,17 @@
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 import 'settings_provider.dart';
+import 'family_firestore_service.dart';
 
-class FamilyMember {
-  final String name;
-  final String relation;
-  final String phoneNumber;
-  final String imagePath;
-  final bool isAsset;
-  final Color color;
-
-  FamilyMember({
-    required this.name,
-    required this.relation,
-    required this.phoneNumber,
-    required this.imagePath,
-    this.isAsset = true,
-    required this.color,
-  });
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// FamilyPage
+// ─────────────────────────────────────────────────────────────────────────────
 
 class FamilyPage extends StatefulWidget {
   const FamilyPage({super.key});
@@ -33,12 +21,12 @@ class FamilyPage extends StatefulWidget {
 }
 
 class _FamilyPageState extends State<FamilyPage> {
-  final List<FamilyMember> _family = [];
-
+  final FamilyFirestoreService _service = FamilyFirestoreService();
   final PageController _pageController = PageController(viewportFraction: 0.88);
   final ImagePicker _picker = ImagePicker();
 
   int _currentPage = 0;
+  bool _isSaving = false;
 
   @override
   void dispose() {
@@ -46,189 +34,328 @@ class _FamilyPageState extends State<FamilyPage> {
     super.dispose();
   }
 
-  void _deleteMember(int index) {
-    setState(() {
-      _family.removeAt(index);
-      // If we were on the last card and deleted it, go back one page
-      if (_currentPage >= _family.length && _currentPage > 0) {
-        _currentPage = _family.length - 1;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _pageController.jumpToPage(_currentPage);
-        });
-      }
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text("Memory removed"),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        backgroundColor: Colors.grey[800],
-      ),
-    );
-  }
-
   void _nextPage() =>
       _pageController.nextPage(duration: 500.ms, curve: Curves.easeOutQuart);
   void _prevPage() =>
       _pageController.previousPage(duration: 500.ms, curve: Curves.easeOutQuart);
 
-  // ─── FIX: All three text fields now appear in the dialog ───────────────────
-  Future<void> _showAddMemberDialog() async {
+  // ── Delete ─────────────────────────────────────────────────────────────────
+  Future<void> _deleteMember(String docId, int familyLength) async {
+    await _service.deleteFamilyMember(docId);
+
+    if (_currentPage >= familyLength - 1 && _currentPage > 0) {
+      final target = familyLength - 2;
+      setState(() => _currentPage = target);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_pageController.hasClients) _pageController.jumpToPage(target);
+      });
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Memory removed'),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          backgroundColor: Colors.grey[800],
+        ),
+      );
+    }
+  }
+
+  // ── Add-member bottom sheet (replaces AlertDialog — no overflow) ────────────
+  Future<void> _showAddMemberSheet() async {
     final nameController = TextEditingController();
     final relationController = TextEditingController();
     final phoneController = TextEditingController();
-    String? pickedImagePath;
 
-    final List<Color> pastelColors = [
-      const Color(0xFFF3E5F5),
-      const Color(0xFFE8F5E9),
-      const Color(0xFFFFF3E0),
-      const Color(0xFFE3F2FD),
-      const Color(0xFFFCE4EC),
+    const pastelColors = [
+      Color(0xFFF3E5F5),
+      Color(0xFFE8F5E9),
+      Color(0xFFFFF3E0),
+      Color(0xFFE3F2FD),
+      Color(0xFFFCE4EC),
     ];
 
-    await showDialog(
+    await showModalBottomSheet(
       context: context,
-      builder: (context) {
+      isScrollControlled: true,   // ← lets it resize above keyboard
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        String? pickedImagePath;
+        bool saving = false;
+
         return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: Colors.white,
-              surfaceTintColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(28)),
-              title: const Text(
-                "New Memory",
-                style: TextStyle(
-                    color: Color(0xFF1F2937), fontWeight: FontWeight.bold),
+          builder: (sheetContext, setSheetState) {
+            return Padding(
+              // ── KEY FIX: pushes sheet above keyboard ──────────────────────
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
               ),
-              content: SingleChildScrollView(
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // ── Photo picker ──────────────────────────────────────
-                    GestureDetector(
-                      onTap: () async {
-                        final XFile? image = await _picker.pickImage(
-                            source: ImageSource.gallery);
-                        if (image != null) {
-                          setDialogState(
-                              () => pickedImagePath = image.path);
-                        }
-                      },
-                      child: Container(
-                        height: 100,
-                        width: 100,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF3F4F6),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                              color: const Color(0xFF2D6A4F).withOpacity(0.3),
-                              width: 2),
-                          image: pickedImagePath != null
-                              ? DecorationImage(
-                                  image: FileImage(File(pickedImagePath!)),
-                                  fit: BoxFit.cover)
-                              : null,
-                        ),
-                        child: pickedImagePath == null
-                            ? const Icon(Icons.add_a_photo_rounded,
-                                size: 32, color: Color(0xFF2D6A4F))
-                            : null,
+                    // ── Handle bar ──────────────────────────────────────────
+                    const SizedBox(height: 12),
+                    Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE5E7EB),
+                        borderRadius: BorderRadius.circular(2),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      pickedImagePath == null
-                          ? "Tap to add photo"
-                          : "Tap to change photo",
-                      style: TextStyle(
-                          fontSize: 12, color: Colors.grey[500]),
                     ),
                     const SizedBox(height: 20),
 
-                    // ── FIX: Name field ───────────────────────────────────
-                    _buildTextField(
-                      nameController,
-                      "Name *",
-                      Icons.person_outline_rounded,
+                    // ── Header ──────────────────────────────────────────────
+                    const Text(
+                      'New Memory',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF1F2937),
+                        letterSpacing: -0.5,
+                      ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Add someone special to your circle',
+                      style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+                    ),
+                    const SizedBox(height: 24),
 
-                    // ── FIX: Relation field ───────────────────────────────
-                    _buildTextField(
-                      relationController,
-                      "Relation (e.g. Sister)",
-                      Icons.favorite_border_rounded,
+                    // ── Photo picker row ────────────────────────────────────
+                    GestureDetector(
+                      onTap: saving
+                          ? null
+                          : () async {
+                              final XFile? img = await _picker.pickImage(
+                                source: ImageSource.gallery,
+                                imageQuality: 85,
+                              );
+                              if (img != null) {
+                                setSheetState(() => pickedImagePath = img.path);
+                              }
+                            },
+                      child: Stack(
+                        alignment: Alignment.bottomRight,
+                        children: [
+                          Container(
+                            width: 90,
+                            height: 90,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: const Color(0xFFF3F4F6),
+                              border: Border.all(
+                                color: pickedImagePath != null
+                                    ? const Color(0xFF2D6A4F)
+                                    : const Color(0xFFE5E7EB),
+                                width: 2,
+                              ),
+                              image: pickedImagePath != null
+                                  ? DecorationImage(
+                                      image: FileImage(File(pickedImagePath!)),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null,
+                            ),
+                            child: pickedImagePath == null
+                                ? const Icon(Icons.person_rounded,
+                                    size: 40, color: Color(0xFFD1D5DB))
+                                : null,
+                          ),
+                          // Camera badge
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF2D6A4F),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.camera_alt_rounded,
+                                size: 14, color: Colors.white),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 24),
 
-                    // ── FIX: Phone field ──────────────────────────────────
-                    _buildTextField(
-                      phoneController,
-                      "Phone number",
-                      Icons.phone_outlined,
-                      isPhone: true,
+                    // ── Fields ──────────────────────────────────────────────
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Column(
+                        children: [
+                          _buildSheetField(
+                            nameController, 'Name *',
+                            Icons.person_outline_rounded,
+                          ),
+                          const SizedBox(height: 12),
+                          _buildSheetField(
+                            relationController, 'Relation (e.g. Sister)',
+                            Icons.favorite_border_rounded,
+                          ),
+                          const SizedBox(height: 12),
+                          _buildSheetField(
+                            phoneController, 'Phone number',
+                            Icons.phone_outlined,
+                            isPhone: true,
+                          ),
+                        ],
+                      ),
                     ),
+                    const SizedBox(height: 24),
+
+                    // ── Action buttons ──────────────────────────────────────
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Row(
+                        children: [
+                          // Cancel
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: saving
+                                  ? null
+                                  : () => Navigator.pop(sheetContext),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(
+                                    color: Color(0xFFE5E7EB)),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16)),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                              ),
+                              child: Text('Cancel',
+                                  style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontWeight: FontWeight.w600)),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          // Save
+                          Expanded(
+                            flex: 2,
+                            child: ElevatedButton(
+                              onPressed: saving
+                                  ? null
+                                  : () async {
+                                      if (nameController.text.trim().isEmpty) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                            content: const Text(
+                                                'Please enter a name'),
+                                            behavior:
+                                                SnackBarBehavior.floating,
+                                            backgroundColor: Colors.redAccent,
+                                            shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(10)),
+                                          ),
+                                        );
+                                        return;
+                                      }
+
+                                      setSheetState(() => saving = true);
+                                      setState(() => _isSaving = true);
+
+                                      try {
+                                        final member = FamilyMember(
+                                          name: nameController.text.trim(),
+                                          relation:
+                                              relationController.text.trim(),
+                                          phoneNumber:
+                                              phoneController.text.trim(),
+                                          imageUrl: '',
+                                          color: pastelColors[Random()
+                                              .nextInt(pastelColors.length)],
+                                        );
+
+                                        await _service.addFamilyMember(
+                                          member,
+                                          localImagePath: pickedImagePath ?? '',
+                                        );
+
+                                        if (mounted) {
+                                          Navigator.pop(sheetContext);
+                                        }
+
+                                        // Scroll back to member cards (not Add card)
+                                        Future.delayed(400.ms, () {
+                                          if (_pageController.hasClients &&
+                                              mounted) {
+                                            _pageController.animateToPage(
+                                              0,
+                                              duration: 600.ms,
+                                              curve: Curves.easeOutQuart,
+                                            );
+                                          }
+                                        });
+                                      } catch (e) {
+                                        if (mounted) {
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                  'Failed to save: $e'),
+                                              behavior:
+                                                  SnackBarBehavior.floating,
+                                              backgroundColor:
+                                                  Colors.redAccent,
+                                              shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          10)),
+                                            ),
+                                          );
+                                        }
+                                      } finally {
+                                        if (mounted) {
+                                          setState(() => _isSaving = false);
+                                        }
+                                      }
+                                    },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF2D6A4F),
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor:
+                                    const Color(0xFF2D6A4F).withOpacity(0.5),
+                                elevation: 0,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16)),
+                              ),
+                              child: saving
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white),
+                                    )
+                                  : const Text(
+                                      'Save Memory',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16),
+                                    ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // ── Safe area bottom padding ─────────────────────────────
+                    SizedBox(
+                        height: MediaQuery.of(sheetContext).padding.bottom +
+                            16),
                   ],
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text("Cancel",
-                      style: TextStyle(color: Colors.grey[500], fontSize: 16)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2D6A4F),
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 24, vertical: 12),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                  onPressed: () {
-                    if (nameController.text.trim().isNotEmpty) {
-                      setState(() {
-                        _family.add(FamilyMember(
-                          name: nameController.text.trim(),
-                          relation: relationController.text.trim(),
-                          phoneNumber: phoneController.text.trim(),
-                          imagePath: pickedImagePath ?? '',
-                          isAsset: false,
-                          color: pastelColors[
-                              Random().nextInt(pastelColors.length)],
-                        ));
-                      });
-                      Navigator.pop(context);
-                      Future.delayed(300.ms, () {
-                        if (_pageController.hasClients) {
-                          _pageController.animateToPage(
-                            _family.length - 1,
-                            duration: 600.ms,
-                            curve: Curves.easeOutQuart,
-                          );
-                        }
-                      });
-                    } else {
-                      // Shake / highlight the name field by showing a snackbar
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: const Text("Please enter a name"),
-                          behavior: SnackBarBehavior.floating,
-                          backgroundColor: Colors.redAccent,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                        ),
-                      );
-                    }
-                  },
-                  child: const Text("Save Memory",
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ],
             );
           },
         );
@@ -236,7 +363,7 @@ class _FamilyPageState extends State<FamilyPage> {
     );
   }
 
-  Widget _buildTextField(
+  Widget _buildSheetField(
     TextEditingController controller,
     String hint,
     IconData icon, {
@@ -245,44 +372,41 @@ class _FamilyPageState extends State<FamilyPage> {
     return TextField(
       controller: controller,
       keyboardType: isPhone ? TextInputType.phone : TextInputType.text,
-      textCapitalization: isPhone
-          ? TextCapitalization.none
-          : TextCapitalization.words,
+      textCapitalization:
+          isPhone ? TextCapitalization.none : TextCapitalization.words,
       decoration: InputDecoration(
-        prefixIcon:
-            Icon(icon, color: const Color(0xFF9CA3AF), size: 22),
+        prefixIcon: Icon(icon, color: const Color(0xFF9CA3AF), size: 20),
         hintText: hint,
-        hintStyle: TextStyle(color: Colors.grey[400]),
+        hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
         filled: true,
         fillColor: const Color(0xFFF9FAFB),
         enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: BorderSide.none),
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
         focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(
-                color: Color(0xFF2D6A4F), width: 1.5)),
+            borderRadius: BorderRadius.circular(14),
+            borderSide:
+                const BorderSide(color: Color(0xFF2D6A4F), width: 1.5)),
         contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
     );
   }
 
-  // ── Page dots indicator ─────────────────────────────────────────────────────
-  Widget _buildDots() {
-    final total = _family.length + 1; // +1 for Add card
+  // ── Dots indicator ─────────────────────────────────────────────────────────
+  Widget _buildDots(int total) {
     if (total <= 1) return const SizedBox.shrink();
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: List.generate(total, (i) {
-        final isActive = i == _currentPage;
+        final active = i == _currentPage;
         return AnimatedContainer(
           duration: 300.ms,
           margin: const EdgeInsets.symmetric(horizontal: 4),
-          width: isActive ? 20 : 8,
+          width: active ? 20 : 8,
           height: 8,
           decoration: BoxDecoration(
-            color: isActive
+            color: active
                 ? const Color(0xFF2D6A4F)
                 : const Color(0xFFD1D5DB),
             borderRadius: BorderRadius.circular(4),
@@ -292,6 +416,41 @@ class _FamilyPageState extends State<FamilyPage> {
     );
   }
 
+  // ── Empty state ────────────────────────────────────────────────────────────
+  Widget _buildEmptyState(double fontScale) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(28),
+          decoration: const BoxDecoration(
+            color: Color(0xFFF3F4F6),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.people_outline_rounded,
+              size: 52, color: Color(0xFF9CA3AF)),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'No loved ones added yet',
+          style: TextStyle(
+            fontSize: 20 * fontScale,
+            fontWeight: FontWeight.bold,
+            color: const Color(0xFF374151),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Tap the + button to add your first memory',
+          style: TextStyle(
+              fontSize: 14 * fontScale, color: const Color(0xFF9CA3AF)),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final settings = SettingsProvider.of(context);
@@ -300,6 +459,20 @@ class _FamilyPageState extends State<FamilyPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFFDFDFD),
       extendBodyBehindAppBar: true,
+
+      // ── FAB: always-visible add button ─────────────────────────────────────
+      // FIX #3: removed Add card from PageView entirely.
+      // The FAB triggers the sheet from anywhere — no need to swipe to a card.
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _isSaving ? null : _showAddMemberSheet,
+        backgroundColor: const Color(0xFF2D6A4F),
+        foregroundColor: Colors.white,
+        elevation: 4,
+        icon: const Icon(Icons.person_add_rounded),
+        label: const Text('Add',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+      ),
+
       appBar: AppBar(
         title: Text(
           'My Loved Ones',
@@ -333,17 +506,16 @@ class _FamilyPageState extends State<FamilyPage> {
           ),
         ),
       ),
+
       body: Stack(
         children: [
-          // ── Ambient background blobs ──────────────────────────────────────
+          // ── Background blobs ────────────────────────────────────────────────
           Positioned(
-            top: -100,
-            right: -100,
+            top: -100, right: -100,
             child: ImageFiltered(
               imageFilter: ImageFilter.blur(sigmaX: 80, sigmaY: 80),
               child: Container(
-                width: 400,
-                height: 400,
+                width: 400, height: 400,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: const Color(0xFFE0F2F1).withOpacity(0.6),
@@ -352,13 +524,11 @@ class _FamilyPageState extends State<FamilyPage> {
             ),
           ),
           Positioned(
-            bottom: -50,
-            left: -50,
+            bottom: -50, left: -50,
             child: ImageFiltered(
               imageFilter: ImageFilter.blur(sigmaX: 60, sigmaY: 60),
               child: Container(
-                width: 300,
-                height: 300,
+                width: 300, height: 300,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: const Color(0xFFFFF3E0).withOpacity(0.6),
@@ -367,82 +537,125 @@ class _FamilyPageState extends State<FamilyPage> {
             ),
           ),
 
-          // ── Main content ──────────────────────────────────────────────────
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              SizedBox(
-                height: MediaQuery.of(context).size.height * 0.72,
-                child: PageView.builder(
-                  controller: _pageController,
-                  itemCount: _family.length + 1,
-                  physics: const BouncingScrollPhysics(),
-                  onPageChanged: (index) =>
-                      setState(() => _currentPage = index),
-                  itemBuilder: (context, index) {
-                    return AnimatedBuilder(
-                      animation: _pageController,
-                      builder: (context, child) {
-                        double value = 1.0;
-                        if (_pageController.position.haveDimensions) {
-                          value = _pageController.page! - index;
-                          value =
-                              (1 - (value.abs() * 0.18)).clamp(0.82, 1.0);
-                        }
-                        return Transform.scale(scale: value, child: child);
-                      },
-                      child: index == _family.length
-                          ? Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 10),
-                              child: AddMemoryCard(
-                                  onTap: _showAddMemberDialog,
-                                  fontScale: fontScale),
-                            )
-                          : Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 10),
-                              child: PremiumFamilyCard(
-                                member: _family[index],
-                                fontScale: fontScale,
-                                onDelete: () => _deleteMember(index),
+          // ── StreamBuilder ───────────────────────────────────────────────────
+          StreamBuilder<List<FamilyMember>>(
+            stream: _service.getFamilyMembers(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.wifi_off_rounded,
+                            size: 48, color: Color(0xFF9CA3AF)),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Could not load family members.\nPlease check your connection.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: 15 * fontScale,
+                              color: const Color(0xFF6B7280)),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final family = snapshot.data ?? [];
+
+              // ── Empty state ─────────────────────────────────────────────────
+              if (family.isEmpty) {
+                return Center(child: _buildEmptyState(fontScale));
+              }
+
+              // ── PageView — only member cards, no Add card inside ─────────────
+              // FIX #3: Add card removed from PageView.
+              // itemCount = family.length (no +1)
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  // dots row ~28px (dot 8 + margins 20), rest goes to PageView
+                  final pageViewHeight = constraints.maxHeight - 28;
+                  return Stack(
+                children: [
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        height: pageViewHeight,
+                        child: PageView.builder(
+                          controller: _pageController,
+                          itemCount: family.length,
+                          physics: const BouncingScrollPhysics(),
+                          onPageChanged: (i) =>
+                              setState(() => _currentPage = i),
+                          itemBuilder: (context, index) {
+                            return AnimatedBuilder(
+                              animation: _pageController,
+                              builder: (context, child) {
+                                double scale = 1.0;
+                                if (_pageController
+                                    .position.haveDimensions) {
+                                  scale = _pageController.page! - index;
+                                  scale = (1 - (scale.abs() * 0.18))
+                                      .clamp(0.82, 1.0);
+                                }
+                                return Transform.scale(
+                                    scale: scale, child: child);
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 10),
+                                child: PremiumFamilyCard(
+                                  member: family[index],
+                                  fontScale: fontScale,
+                                  onDelete: () => _deleteMember(
+                                      family[index].docId, family.length),
+                                ),
                               ),
-                            ),
-                    );
-                  },
-                ),
-              ),
+                            );
+                          },
+                        ),
+                      ),
 
-              // ── Dots indicator ────────────────────────────────────────────
-              const SizedBox(height: 16),
-              _buildDots(),
-              const SizedBox(height: 8),
-            ],
+                      // Dots
+                      const SizedBox(height: 12),
+                      _buildDots(family.length),
+                      const SizedBox(height: 8),
+                    ],
+                  ),
+
+                  // Prev arrow
+                  if (_currentPage > 0)
+                    Positioned(
+                      left: 8, top: 0, bottom: 80,
+                      child: Center(
+                        child: _buildGlassArrow(
+                            Icons.arrow_back_ios_new_rounded, _prevPage),
+                      ),
+                    ),
+
+                  // Next arrow
+                  if (_currentPage < family.length - 1)
+                    Positioned(
+                      right: 8, top: 0, bottom: 80,
+                      child: Center(
+                        child: _buildGlassArrow(
+                            Icons.arrow_forward_ios_rounded, _nextPage),
+                      ),
+                    ),
+                ],
+              ); // Stack
+                }, // LayoutBuilder builder
+              ); // LayoutBuilder
+            },
           ),
-
-          // ── Arrow: previous ───────────────────────────────────────────────
-          if (_currentPage > 0)
-            Positioned(
-              left: 8,
-              top: 0,
-              bottom: 80,
-              child: Center(
-                child: _buildGlassArrow(
-                    Icons.arrow_back_ios_new_rounded, _prevPage),
-              ),
-            ),
-
-          // ── Arrow: next ───────────────────────────────────────────────────
-          if (_currentPage < _family.length)
-            Positioned(
-              right: 8,
-              top: 0,
-              bottom: 80,
-              child: Center(
-                child: _buildGlassArrow(
-                    Icons.arrow_forward_ios_rounded, _nextPage),
-              ),
-            ),
         ],
       ),
     );
@@ -477,75 +690,6 @@ class _FamilyPageState extends State<FamilyPage> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Add Memory Card
-// ─────────────────────────────────────────────────────────────────────────────
-
-class AddMemoryCard extends StatelessWidget {
-  final VoidCallback onTap;
-  final double fontScale;
-
-  const AddMemoryCard(
-      {super.key, required this.onTap, required this.fontScale});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(32),
-          border: Border.all(
-              color: const Color(0xFFE5E7EB).withOpacity(0.8), width: 1.5),
-          boxShadow: [
-            BoxShadow(
-                color: const Color(0xFFE5E7EB).withOpacity(0.5),
-                blurRadius: 20,
-                offset: const Offset(0, 8)),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(28),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF3F4F6),
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.03),
-                      blurRadius: 10,
-                      spreadRadius: 5),
-                ],
-              ),
-              child: const Icon(Icons.add_rounded,
-                  size: 40, color: Color(0xFF9CA3AF)),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              "New Memory",
-              style: TextStyle(
-                fontSize: 22 * fontScale,
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFF374151),
-                letterSpacing: -0.5,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              "Add a loved one",
-              style: TextStyle(
-                  fontSize: 16 * fontScale, color: const Color(0xFF9CA3AF)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Premium Family Card
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -562,37 +706,31 @@ class PremiumFamilyCard extends StatelessWidget {
   });
 
   Future<void> _makePhoneCall() async {
-    final String cleanNumber =
-        member.phoneNumber.replaceAll(RegExp(r'\s+'), '');
-    if (cleanNumber.isEmpty) return;
-    final Uri launchUri = Uri(scheme: 'tel', path: cleanNumber);
-    if (await canLaunchUrl(launchUri)) await launchUrl(launchUri);
+    final clean = member.phoneNumber.replaceAll(RegExp(r'\s+'), '');
+    if (clean.isEmpty) return;
+    final uri = Uri(scheme: 'tel', path: clean);
+    if (await canLaunchUrl(uri)) await launchUrl(uri);
   }
 
   Future<void> _openWhatsApp() async {
-    final String cleanNumber =
-        member.phoneNumber.replaceAll(RegExp(r'[^\d]'), '');
-    if (cleanNumber.isEmpty) return;
-    final Uri url = Uri.parse("https://wa.me/$cleanNumber");
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+    final clean = member.phoneNumber.replaceAll(RegExp(r'[^\d]'), '');
+    if (clean.isEmpty) return;
+    final uri = Uri.parse('https://wa.me/$clean');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
   String _getInitials(String name) {
     if (name.isEmpty) return '?';
     final parts = name.trim().split(' ');
-    if (parts.length >= 2) {
-      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-    }
-    return name[0].toUpperCase();
+    return parts.length >= 2
+        ? '${parts[0][0]}${parts[1][0]}'.toUpperCase()
+        : name[0].toUpperCase();
   }
 
   Widget _buildImageContent(double fontScale) {
-    final bool hasImage =
-        member.imagePath.isNotEmpty;
-
-    if (!hasImage) {
+    if (member.imageUrl.isEmpty) {
       return Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -632,13 +770,16 @@ class PremiumFamilyCard extends StatelessWidget {
     }
 
     return Hero(
-      tag: member.name,
-      child: Image(
-        image: member.isAsset
-            ? AssetImage(member.imagePath) as ImageProvider
-            : FileImage(File(member.imagePath)),
+      tag: 'family_${member.docId}',
+      child: CachedNetworkImage(
+        imageUrl: member.imageUrl,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Container(
+        placeholder: (_, __) => Container(
+          color: member.color,
+          child: const Center(
+              child: CircularProgressIndicator(strokeWidth: 2)),
+        ),
+        errorWidget: (_, __, ___) => Container(
           color: const Color(0xFFF3F4F6),
           child: const Icon(Icons.broken_image_rounded,
               size: 50, color: Colors.grey),
@@ -653,18 +794,18 @@ class PremiumFamilyCard extends StatelessWidget {
       builder: (context) => AlertDialog(
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.white,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text("Delete Memory?",
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24)),
+        title: const Text('Delete Memory?',
             style: TextStyle(fontWeight: FontWeight.bold)),
         content: Text(
-          "Are you sure you want to remove ${member.name}?",
+          'Are you sure you want to remove ${member.name}?',
           style: const TextStyle(color: Colors.grey),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("Keep",
+            child: const Text('Keep',
                 style: TextStyle(color: Colors.grey)),
           ),
           TextButton(
@@ -672,7 +813,7 @@ class PremiumFamilyCard extends StatelessWidget {
               Navigator.pop(context);
               onDelete();
             },
-            child: const Text("Remove",
+            child: const Text('Remove',
                 style: TextStyle(
                     color: Colors.redAccent,
                     fontWeight: FontWeight.bold)),
@@ -701,22 +842,19 @@ class PremiumFamilyCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(32),
         child: Column(
           children: [
-            // ── Photo / Initials area ─────────────────────────────────────
+            // ── Photo / Initials ──────────────────────────────────────────────
             Expanded(
               flex: 55,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
                   _buildImageContent(fontScale),
-
-                  // Delete button (top-right)
+                  // Delete button
                   Positioned(
-                    top: 16,
-                    right: 16,
+                    top: 16, right: 16,
                     child: ClipOval(
                       child: BackdropFilter(
-                        filter:
-                            ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                         child: GestureDetector(
                           onTap: () => _confirmDelete(context),
                           child: Container(
@@ -725,10 +863,8 @@ class PremiumFamilyCard extends StatelessWidget {
                               color: Colors.black.withOpacity(0.15),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(
-                                Icons.delete_outline_rounded,
-                                color: Colors.white,
-                                size: 20),
+                            child: const Icon(Icons.delete_outline_rounded,
+                                color: Colors.white, size: 20),
                           ),
                         ),
                       ),
@@ -738,11 +874,11 @@ class PremiumFamilyCard extends StatelessWidget {
               ),
             ),
 
-            // ── Info + buttons area ───────────────────────────────────────
+            // ── Info + buttons ────────────────────────────────────────────────
             Expanded(
               flex: 45,
               child: Container(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
                 color: Colors.white,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -763,7 +899,7 @@ class PremiumFamilyCard extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 6),
                         if (member.relation.isNotEmpty)
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -784,24 +920,21 @@ class PremiumFamilyCard extends StatelessWidget {
                       ],
                     ),
 
-                    // Call + WhatsApp buttons
+                    // Call + WhatsApp — label text won't wrap now
                     Row(
                       children: [
-                        // Call button
                         Expanded(
                           child: SizedBox(
-                            height: 58,
+                            height: 48,
                             child: ElevatedButton.icon(
                               onPressed: member.phoneNumber.isNotEmpty
                                   ? _makePhoneCall
                                   : null,
-                              icon: const Icon(Icons.call_rounded, size: 22),
-                              label: Text(
-                                "Call",
-                                style: TextStyle(
-                                    fontSize: 15 * fontScale,
-                                    fontWeight: FontWeight.w600),
-                              ),
+                              icon: const Icon(Icons.call_rounded, size: 18),
+                              label: const Text('Call',
+                                  style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600)),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF2D6A4F),
                                 foregroundColor: Colors.white,
@@ -810,38 +943,38 @@ class PremiumFamilyCard extends StatelessWidget {
                                 elevation: 0,
                                 shape: RoundedRectangleBorder(
                                     borderRadius:
-                                        BorderRadius.circular(18)),
+                                        BorderRadius.circular(16)),
                               ),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 12),
-
-                        // WhatsApp button
+                        const SizedBox(width: 10),
                         Expanded(
                           child: SizedBox(
-                            height: 58,
+                            height: 48,
                             child: ElevatedButton.icon(
                               onPressed: member.phoneNumber.isNotEmpty
                                   ? _openWhatsApp
                                   : null,
-                              icon: const Icon(
-                                  Icons.chat_bubble_rounded, size: 20),
-                              label: Text(
-                                "WhatsApp",
-                                style: TextStyle(
-                                    fontSize: 15 * fontScale,
-                                    fontWeight: FontWeight.w600),
-                              ),
+                              icon: const Icon(Icons.chat_bubble_rounded,
+                                  size: 16),
+                              label: const Text('WhatsApp',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF25D366),
                                 foregroundColor: Colors.white,
                                 disabledBackgroundColor:
                                     Colors.grey.shade300,
                                 elevation: 0,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8),
                                 shape: RoundedRectangleBorder(
                                     borderRadius:
-                                        BorderRadius.circular(18)),
+                                        BorderRadius.circular(16)),
                               ),
                             ),
                           ),

@@ -59,7 +59,7 @@ def create_reminder(
     time_text,
     source="assistant",
     recurring_type="none",
-    user_timezone="UTC",
+    user_timezone="Asia/Kolkata",  # ✅ FIX: was "UTC" — caused time-shifted ghost reminders
     time_display=None       # ✅ human-readable string for display (e.g. "8pm") — optional
 ):
 
@@ -67,6 +67,10 @@ def create_reminder(
     reminder_id = str(uuid.uuid4())
 
     scheduled_time = parse_time_to_utc(time_text, user_timezone)
+
+    # ✅ DEBUG: log the resolved time so you can verify IST→UTC conversion is correct
+    print("REMINDER TIME:", scheduled_time)
+    print("USER TIMEZONE:", user_timezone)
 
     # time_text stored in Firestore should be a readable string, not a datetime object.
     # Use time_display if provided, otherwise fall back to isoformat of scheduled_time.
@@ -90,7 +94,10 @@ def create_reminder(
     "last_modified": firestore.SERVER_TIMESTAMP
 })
 
-    schedule_job(user_id, reminder_id, scheduled_time, recurring_type)
+    # ✅ FIX: Commented out — Flutter already schedules local notifications via
+    # the Firestore stream in ReminderPage. Running APScheduler here too causes
+    # duplicate / ghost notifications on every reminder.
+    # schedule_job(user_id, reminder_id, scheduled_time, recurring_type)
 
     return reminder_id
 

@@ -22,10 +22,13 @@ class ChatbotService {
 
       final uid = user.uid;
 
-      // 🔥 CHANGED: Include profile_text in request body if provided
+      // ✅ Always send timezone so the backend reminder parser uses IST,
+      // not the server's UTC default. This fixes ghost/shifted reminders
+      // from both voice and chat code paths.
       final Map<String, dynamic> requestBody = {
-        "message": userMessage,
-        "user_id": uid,
+        "message":  userMessage,
+        "user_id":  uid,
+        "timezone": "Asia/Kolkata",
         if (profileText != null && profileText.isNotEmpty)
           "profile_text": profileText,
       };
