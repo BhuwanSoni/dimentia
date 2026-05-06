@@ -25,7 +25,7 @@ def create_manual_reminder():
         task = data.get("task")
         time_text = data.get("time_text")
         recurring_type = data.get("recurring_type", "none")
-        timezone = data.get("timezone", "UTC")
+        timezone = data.get("timezone", "Asia/Kolkata")  # ✅ FIX: was "UTC" — caused shifted reminders
 
         if not user_id or not task or not time_text:
             return jsonify({"error": "Missing required fields"}), 400

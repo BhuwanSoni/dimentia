@@ -227,7 +227,19 @@ def parse_natural_reminder(user_message):
 
     if not any(
         word in text
-        for word in ["remind", "reminder", "appointment", "meeting", "doctor"]
+        for word in [
+            # English — all natural phrasings a user might say
+            "remind", "reminder", "reminders",
+            "appointment", "meeting", "doctor",
+            # Common synonyms the parser was missing
+            "make a reminder", "make reminder",
+            "add a reminder", "add reminder",
+            "create a reminder", "create reminder",
+            "set reminder", "schedule",
+            "alarm", "alert",
+            "please remind", "can you remind",
+            "don't forget", "don't let me forget",
+        ]
     ) and not is_hindi:
         return None
 
@@ -244,8 +256,11 @@ def parse_natural_reminder(user_message):
         text,
     )
 
-    # Extract time
+    # Extract time — handles "9am", "9:00 am", "9:00 a.m." (with dots)
     text       = re.sub(r'(\d)(baje)', r'\1 \2', text)
+    # Normalise dotted a.m./p.m. → am/pm before matching
+    text       = re.sub(r'\ba\.m\b\.?', 'am', text)
+    text       = re.sub(r'\bp\.m\b\.?', 'pm', text)
     time_match = re.search(r'(\d{1,2})(:\d{2})?\s*(am|pm|baje)', text)
     if not time_match:
         time_match = re.search(r'(\d{1,2})\s*(am|pm)', text)
@@ -317,14 +332,22 @@ def parse_natural_reminder(user_message):
 
     # Clean task text
     task = text
+    # Strip all reminder-setting phrasings first (order matters — longest first)
     task = re.sub(
-        r'(set a reminder of|set a reminder to|set a reminder|remind me to|remind me about|remind me)',
+        r'(okay please|okay|please|can you|could you)\s+', '', task,
+    )
+    task = re.sub(
+        r'(make a reminder(?: for)?|add a reminder(?: for)?|create a reminder(?: for)?'
+        r'|set a reminder(?: of| to| for| about)?'
+        r'|set a reminder to|set a reminder|remind me to|remind me about|remind me)',
         '', task,
     )
     task = re.sub(r'(lena hai|leni hai|khana hai|pina hai|yaad dilana|yaad dila)', '', task)
     task = re.sub(r'\b(mujhe|mujko|aaj|kal|parso)\b', '', task)
     task = re.sub(r'\b(of|at|on|for|to|about)\b', '', task)
     task = re.sub(r'\d{1,2}(:\d{2})?\s*(am|pm|baje)', '', task)
+    # Also strip "9:00 a.m." / "9:00 p.m." style (with dots)
+    task = re.sub(r'\d{1,2}(:\d{2})?\s*[ap]\.m\.', '', task)
     task = task.replace("subah", "").replace("shaam", "").replace("raat", "")
     task = task.replace("tomorrow", "").replace("today", "").replace("aaj", "")
     task = task.replace("kal", "").replace("parso", "")
