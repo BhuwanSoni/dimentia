@@ -488,12 +488,23 @@ User Profile:
                 .add({
               'title': task,
               'task': task,
+              // ✅ FIX: Store both UTC timestamp fields so the stream listener
+              // in reminders.dart (which reads 'scheduled_time' first) and
+              // the Python backend (which also writes 'scheduled_time') agree.
               'time': Timestamp.fromDate(scheduledDateTime.toUtc()),
               'scheduled_time': Timestamp.fromDate(scheduledDateTime.toUtc()),
               'completed': false,
               'source': 'assistant_sheet',
               'recurring_type': recurring,
+              // ✅ FIX: time_text must be the LOCAL display time, not UTC.
+              // Previously this was correct but lacked a timezone field,
+              // causing the Python backend to misinterpret the reminder time.
               'time_text': DateFormat('hh:mm a').format(scheduledDateTime),
+              // ✅ FIX: Add timezone so the backend reminder parser uses IST,
+              // matching assistant_service.py and reminder_service.py defaults.
+              'timezone': 'Asia/Kolkata',
+              'created_at': FieldValue.serverTimestamp(),
+              'last_modified': FieldValue.serverTimestamp(),
             });
 
             // Schedule the local notification immediately — don't wait for

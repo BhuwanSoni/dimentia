@@ -158,6 +158,12 @@ def get_user_reminders(user_id, include_completed=False):
     if not include_completed:
         query = query.where("completed", "==", False)
 
+    # ✅ FIX: Order by scheduled_time so Flutter stream receives docs in
+    # chronological order. Without this, the orderBy('scheduled_time') in
+    # reminders.dart's getReminders() would work but the REST list endpoint
+    # returned unordered results.
+    query = query.order_by("scheduled_time")
+
     docs = query.stream()
 
     reminders = []
@@ -189,9 +195,22 @@ def get_next_reminder(user_id):
 
     for doc in docs:
         data = doc.to_dict()
-        if data.get("scheduled_time") and data["scheduled_time"] > now:
-            data["id"] = doc.id
-            upcoming.append(data)
+        raw_time = data.get("scheduled_time") or data.get("time")
+        if raw_time is None:
+            continue
+        # ✅ FIX: Firestore DatetimeWithNanoseconds is timezone-aware (UTC).
+        # Ensure we always compare two aware datetimes to avoid TypeError.
+        try:
+            st = raw_time
+            if hasattr(st, 'tzinfo') and st.tzinfo is None:
+                st = pytz.utc.localize(st)
+            if st > now:
+                data["id"] = doc.id
+                data["scheduled_time"] = st  # normalise key
+                upcoming.append(data)
+        except Exception as e:
+            print(f"⚠️ get_next_reminder comparison error for {doc.id}: {e}")
+            continue
 
     if not upcoming:
         return None

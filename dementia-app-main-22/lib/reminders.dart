@@ -51,11 +51,16 @@ class FirestoreService {
   }
 
   Stream<QuerySnapshot> getReminders() {
+    // ✅ FIX: Order by 'scheduled_time' — this is the field written by BOTH
+    // the Python backend (voice/assistant reminders) and the Flutter manual
+    // reminder dialog. The old 'time' orderBy caused the entire stream to
+    // return empty when any document was missing the 'time' field index,
+    // which meant voice-created reminders never appeared on this page.
     return _db
         .collection('users')
         .doc(userId)
         .collection('reminders')
-        .orderBy('time')
+        .orderBy('scheduled_time')
         .snapshots();
   }
 
@@ -149,6 +154,14 @@ class _ReminderPageState extends State<ReminderPage> {
 
         debugPrint('STREAM EVENT: ${change.type} $docId');
 
+        // ✅ FIX: Handle deletions — cancel notification when a reminder is
+        // deleted (from this device or the Python backend / another device).
+        if (change.type == DocumentChangeType.removed) {
+          await NotificationService.markDone(_notificationIdFromDocId(docId));
+          _scheduledIds.remove(docId);
+          continue;
+        }
+
         // Handle modifications — if a reminder is marked completed
         // (by the Python backend, voice command, or another device),
         // cancel its notification immediately.
@@ -170,8 +183,15 @@ class _ReminderPageState extends State<ReminderPage> {
         // Skip if already completed — no notification needed.
         if (data['completed'] == true) continue;
 
+        // ✅ FIX: Read 'scheduled_time' first (written by Python backend for
+        // voice/assistant reminders), then fall back to 'time'. The old code
+        // did this correctly but the Firestore orderBy('time') above was the
+        // real cause — fixed in getReminders(). Belt-and-suspenders here too.
         final rawTime = data['scheduled_time'] ?? data['time'];
-        if (rawTime == null) continue;
+        if (rawTime == null) {
+          debugPrint('⚠️ Reminder $docId has no time field — skipping');
+          continue;
+        }
 
         DateTime scheduledTime;
         if (rawTime is Timestamp) {
@@ -187,6 +207,7 @@ class _ReminderPageState extends State<ReminderPage> {
         // Skip reminders more than 1 minute in the past — nothing to schedule.
         if (scheduledTime
             .isBefore(DateTime.now().subtract(const Duration(minutes: 1)))) {
+          debugPrint('⚠️ Reminder $docId is in the past — skipping notification');
           continue;
         }
 
@@ -200,7 +221,7 @@ class _ReminderPageState extends State<ReminderPage> {
           type: NotificationAlertType.task,
         );
 
-        debugPrint('🔔 Scheduled reminder: $title ($docId)');
+        debugPrint('🔔 Scheduled reminder: $title at $scheduledTime ($docId)');
       }
     });
   }
@@ -628,6 +649,10 @@ class _ReminderPageState extends State<ReminderPage> {
 
           final reminders = snapshot.data!.docs.map((doc) {
             final data = doc.data() as Map<String, dynamic>;
+            // ✅ FIX: Read 'scheduled_time' first — this is the canonical field
+            // written by the Python backend for voice/assistant reminders.
+            // 'time' is the legacy/Flutter-manual field. Both are stored as UTC
+            // Timestamps; toLocal() converts for display.
             final rawTime = data['scheduled_time'] ?? data['time'];
 
             if (rawTime == null) {

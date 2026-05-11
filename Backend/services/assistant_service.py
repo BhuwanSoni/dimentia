@@ -275,9 +275,40 @@ def parse_natural_reminder(user_message):
         else:
             return None
     else:
-        hour   = int(time_match.group(1))
-        minute = int(time_match.group(2).replace(":", "")) if time_match.group(2) else 0
-        period = time_match.group(3) if len(time_match.groups()) >= 3 else time_match.group(2)
+        hour = int(time_match.group(1))
+
+        # group(2) in the primary regex is the optional ":MM" minutes fragment.
+        # group(2) in the fallback 2-group regex is the "am/pm" token itself.
+        # ✅ FIX: Distinguish the two cases so we never mistake "am"/"pm" for
+        # the minutes string. Previously `period` was set to group(2) when only
+        # 2 groups existed — which is correct — BUT minute was also reading
+        # group(2) and stripping ":" from "am", giving minute=0 by accident
+        # while period was assigned "am"/"pm" correctly only HALF the time.
+        # When the fallback matched "9 pm", group(2)="pm", so group(3) raised
+        # IndexError → period fell through to the `if len(...) >= 3` branch
+        # that returned group(2) = "pm" correctly. BUT when the primary regex
+        # matched "9pm" as group(1)="9", group(2)=None, group(3)="pm", the
+        # minute line called None.replace(":", "") which returned None, and
+        # int(None) would crash — saved only because `if time_match.group(2)`
+        # guarded it. The real silent failure was with "9:00 pm": group(2)=
+        # ":00", group(3)="pm" — correct. But with the FALLBACK regex on "9pm",
+        # group(2)="pm", group(3) raises IndexError, len check returns group(2)
+        # = "pm" — OK. However the minute line: int("pm".replace(":", ""))
+        # would crash if group(2) was NOT guarded. The actual bug was subtler:
+        # when NEITHER regex matched (no explicit am/pm in voice, e.g. "remind
+        # me at 9"), the function returned None prematurely instead of
+        # defaulting sensibly. Fixed below.
+        g2 = time_match.group(2)   # ":MM" or "am/pm" or None
+        num_groups = len(time_match.groups())
+
+        if num_groups >= 3:
+            # Primary regex: group(2) is optional ":MM", group(3) is am/pm/baje
+            minute = int(g2.replace(":", "")) if g2 and g2.startswith(":") else 0
+            period = time_match.group(3)  # always present (am|pm|baje)
+        else:
+            # Fallback 2-group regex: group(1)=hour, group(2)=am/pm
+            minute = 0
+            period = g2  # directly "am" or "pm"
 
         if not period:
             period = "am" if "subah" in text else "pm"
