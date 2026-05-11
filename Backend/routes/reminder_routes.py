@@ -11,7 +11,7 @@ from services.reminder_service import (
     clear_all_reminders,
     snooze_reminder,
     mark_reminder_missed,
-    advance_recurring_reminder,
+    advance_recurring_reminder,   # ✅ imported so route can call it directly
 )
 
 reminder_bp = Blueprint("reminder_bp", __name__)
@@ -185,6 +185,9 @@ def mark_complete():
             return jsonify({"error": "Missing required fields"}), 400
 
         complete_reminder(user_id, reminder_id)
+        # ✅ advance_recurring_reminder() is called INSIDE complete_reminder()
+        # in reminder_service.py. Do NOT call it here too — double-advancing
+        # would skip days (daily → every 2 days, weekly → every 2 weeks, etc.)
 
         return jsonify({"message": "Reminder marked complete"}), 200
 
