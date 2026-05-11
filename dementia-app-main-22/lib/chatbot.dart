@@ -8,7 +8,9 @@ import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'settings_provider.dart';
 import 'chatbot_service.dart';
-import 'notification_service.dart'; // ✅ needed for direct scheduling from reminder sheet
+// ✅ FIX: notification_service import removed — we no longer schedule notifications
+// directly from chatbot.dart. The Firestore stream in ReminderPage is the single
+// scheduling authority, preventing duplicate notifications.
 
 // ═══════════════════════════════════════════════════════════════
 // 🌐 MULTILINGUAL STRINGS  (English + Hindi)
@@ -255,6 +257,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // Send a message programmatically (from chips / sheets)
   Future<void> _sendDirectMessage(String text) async {
+    // ✅ FIX: Set _isLoading = true so the typing indicator appears while waiting.
+    // Old code never set it, leaving the UI looking frozen during slow API responses.
+    setState(() => _isLoading = true);
+    _scrollToBottom();
     try {
       final settings    = SettingsProvider.of(context);
       final botResponse = await _chatbotService.sendMessage(
@@ -507,15 +513,12 @@ User Profile:
               'last_modified': FieldValue.serverTimestamp(),
             });
 
-            // Schedule the local notification immediately — don't wait for
-            // the stream listener, which may be on another page.
-            final settings = SettingsProvider.of(context);
-            await NotificationService.scheduleReminder(
-              id: docRef.id.hashCode.abs() % 2147483647,
-              title: task,
-              scheduledTime: scheduledDateTime,
-              userName: settings.username,
-            );
+            // ✅ FIX: Do NOT call NotificationService.scheduleReminder() here.
+            // The Firestore stream listener in ReminderPage.initState() is the
+            // single scheduling authority for ALL reminder sources. Calling it
+            // here too caused duplicate/triple-firing notifications because both
+            // paths fire independently (this page has no _scheduledIds guard).
+            // The stream picks up the new document automatically.
 
             final h      = time.hour > 12 ? time.hour - 12 : (time.hour == 0 ? 12 : time.hour);
             final m      = time.minute.toString().padLeft(2, '0');

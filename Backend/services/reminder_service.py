@@ -293,10 +293,13 @@ def delete_reminder_by_task(user_id, task_text):
     for doc in docs:
         data = doc.to_dict()
         if task_text.lower() in data.get("task", "").lower():
+            # ✅ FIX: Return the actual stored task name so the caller can echo
+            # it back to the user, instead of echoing the raw user phrasing.
+            actual_task = data.get("task", task_text)
             doc.reference.delete()
-            return True
+            return actual_task
 
-    return False
+    return None
 
 
 # ==========================================================

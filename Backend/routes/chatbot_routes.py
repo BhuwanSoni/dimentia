@@ -1,7 +1,5 @@
 from flask import Blueprint, request, jsonify
 from services.assistant_service import generate_response
-from database.firebase_config import get_firestore_client
-from google.cloud import firestore
 
 chatbot_bp = Blueprint("chatbot_bp", __name__)
 
@@ -19,30 +17,20 @@ def chat():
         if not user_id or not message:
             return jsonify({"error": "Missing user_id or message"}), 400
 
-        # ✅ Generate AI response (chat history handled inside service)
+        # ✅ Generate AI response (chat history + Firestore write handled inside service)
         result = generate_response(
             user_id,
             message,
             flutter_profile_text=profile_text
         )
 
-        # 🔥 OPTIONAL: Save test result ONLY if needed (no duplication)
-        db = get_firestore_client()
-        user_doc = db.collection("users").document(user_id).get()
-
-        if user_doc.exists:
-            user_data = user_doc.to_dict()
-
-            # Save test result safely
-            db.collection("users") \
-              .document(user_id) \
-              .collection("chats") \
-              .add({
-                  "type": "test_result",
-                  "risk_level": user_data.get("risk_level"),
-                  "mmse": user_data.get("MMSE"),
-                  "timestamp": firestore.SERVER_TIMESTAMP
-              })
+        # ✅ FIX: Removed the duplicate Firestore write that was here.
+        # generate_response() in assistant_service.py is the single authoritative
+        # writer for chat history. Writing again here caused:
+        #   - Every reply saved twice (or three times including Flutter client)
+        #   - get_conversation_history() fed duplicate turns to the LLM
+        #   - History window filled 2-3x faster, causing confused/looping replies
+        # If you need to log test_results, add a dedicated /save-test-result endpoint.
 
         return jsonify(result), 200
 

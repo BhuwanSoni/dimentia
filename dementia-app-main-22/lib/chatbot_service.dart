@@ -3,15 +3,18 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ChatbotService {
   final String _backendUrl = "https://dimentia.onrender.com/chat";
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // 🔥 CHANGED: Added optional profileText parameter
+  // ✅ FIX: Removed FirebaseFirestore import and the duplicate Firestore write.
+  // The Python backend (generate_response in assistant_service.py) is the single
+  // authoritative writer for chat history. Writing from Flutter too caused every
+  // reply to appear 2–3 times in Firestore, making get_conversation_history()
+  // feed duplicate turns to the LLM and causing confused/looping responses.
+
   Future<String> sendMessage(String userMessage, {String? profileText}) async {
     try {
       final user = _auth.currentUser;
@@ -45,7 +48,6 @@ class ChatbotService {
       print("📡 BODY: ${response.body}");
 
       if (response.statusCode != 200) {
-        // ✅ Show actual server error instead of generic message
         print("❌ Server error ${response.statusCode}: ${response.body}");
         return "Server error (${response.statusCode}). Check backend logs.";
       }
@@ -59,25 +61,11 @@ class ChatbotService {
         return "Got a bad response from server.";
       }
 
-      final aiReply   = data["reply"]      ?? "I'm here for you.";
-      final riskLevel = data["risk_level"] ?? "Unknown";
-
-      // ✅ Store chat history (key must match get_conversation_history in backend)
-      await _firestore
-          .collection("users")
-          .doc(uid)
-          .collection("chats")
-          .add({
-        "user_message":    userMessage,
-        "assistant_reply": aiReply,        // ✅ FIXED: was "ai_reply" — backend reads "assistant_reply"
-        "risk_level":      riskLevel,
-        "timestamp":       FieldValue.serverTimestamp(),
-      });
+      final aiReply = data["reply"] ?? "I'm here for you.";
 
       return aiReply;
 
     } on SocketException catch (e) {
-      // No internet or server not reachable
       print("❌ SocketException: $e");
       return "Cannot reach server. Is your backend running at $_backendUrl?";
 

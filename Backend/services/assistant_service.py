@@ -204,7 +204,10 @@ def get_latest_risk_level(user_id):
 # =========================================================
 
 DATE_KEYWORDS = [
-    "jan", "feb", "mar", "apr", "may", "jun",
+    "jan", "feb", "mar", "apr",
+    # ✅ FIX: "may" removed — it falsely matched casual phrasing like "I may forget".
+    # "May" as a month is now only matched when followed by a digit (see has_specific_date below).
+    "jun",
     "jul", "aug", "sep", "oct", "nov", "dec",
     "january", "february", "march", "april",
     "june", "july", "august", "september",
@@ -241,6 +244,11 @@ def parse_natural_reminder(user_message):
             "don't forget", "don't let me forget",
         ]
     ) and not is_hindi:
+        return None
+
+    # ✅ FIX: Block question-style "remind me" phrasing — these are memory queries,
+    # not reminder requests. "Remind me what my son's name is" should go to LLM.
+    if re.search(r'remind me (what|who|where|when|how|why|if|whether)', text):
         return None
 
     # Normalize common variations
@@ -321,7 +329,12 @@ def parse_natural_reminder(user_message):
     # Extract date
     local_tz          = tzlocal.get_localzone()
     now               = datetime.now(local_tz)
-    has_specific_date = any(word in text for word in DATE_KEYWORDS)
+    # ✅ FIX: "may" is no longer in DATE_KEYWORDS (prevents "I may forget" false positive).
+    # Check for "may" as a month only when followed by a digit (e.g. "may 15").
+    has_specific_date = (
+        any(word in text for word in DATE_KEYWORDS)
+        or bool(re.search(r'\bmay\s+\d{1,2}\b', text))
+    )
 
     if "parso" in text:
         date = now + timedelta(days=2)
@@ -388,8 +401,12 @@ def parse_natural_reminder(user_message):
             reminder_time += timedelta(days=1)
 
     # Clean task text
+    # ✅ FIX: Strip ALL temporal/context words FIRST, before building the task label.
+    # Old order caused "tomorrow" or "kal" to survive as the only word left,
+    # so the task was saved as "Tomorrow" or fell through to the "Reminder" fallback.
     task = text
-    # Strip all reminder-setting phrasings first (order matters — longest first)
+
+    # Step 1 — Strip reminder-intent phrasings (longest first to avoid partial matches)
     task = re.sub(
         r'(okay please|okay|please|can you|could you)\s+', '', task,
     )
@@ -399,18 +416,29 @@ def parse_natural_reminder(user_message):
         r'|set a reminder to|set a reminder|remind me to|remind me about|remind me)',
         '', task,
     )
+
+    # Step 2 — Strip Hindi intent words
     task = re.sub(r'(lena hai|leni hai|khana hai|pina hai|yaad dilana|yaad dila)', '', task)
-    task = re.sub(r'\b(mujhe|mujko|aaj|kal|parso)\b', '', task)
-    task = re.sub(r'\b(of|at|on|for|to|about)\b', '', task)
-    task = re.sub(r'\d{1,2}(:\d{2})?\s*(am|pm|baje)', '', task)
-    # Also strip "9:00 a.m." / "9:00 p.m." style (with dots)
-    task = re.sub(r'\d{1,2}(:\d{2})?\s*[ap]\.m\.', '', task)
+    task = re.sub(r'\b(mujhe|mujko)\b', '', task)
+
+    # Step 3 — Strip ALL temporal words BEFORE anything else
+    task = task.replace("tomorrow", "").replace("today", "")
+    task = task.replace("kal", "").replace("aaj", "").replace("parso", "")
     task = task.replace("subah", "").replace("shaam", "").replace("raat", "")
-    task = task.replace("tomorrow", "").replace("today", "").replace("aaj", "")
-    task = task.replace("kal", "").replace("parso", "")
+
+    # Step 4 — Strip date keywords (month names, ordinal suffixes)
     for kw in DATE_KEYWORDS:
         task = re.sub(r'\b' + kw + r'\b', '', task)
     task = re.sub(r'\b\d{1,2}(st|nd|rd|th)?\b', '', task)
+
+    # Step 5 — Strip time expressions
+    task = re.sub(r'\d{1,2}(:\d{2})?\s*(am|pm|baje)', '', task)
+    task = re.sub(r'\d{1,2}(:\d{2})?\s*[ap]\.m\.', '', task)
+
+    # Step 6 — Strip filler prepositions
+    task = re.sub(r'\b(of|at|on|for|to|about)\b', '', task)
+
+    # Step 7 — Final cleanup
     task = " ".join(task.split()).capitalize()
 
     # Build display string
@@ -470,13 +498,34 @@ def clear_pending_completion(user_id):
 
 
 def get_conversation_history(user_id, limit=3):
+    # ✅ FIX: Use Firestore .order_by().limit() instead of fetching ALL docs and
+    # sorting in Python. Old approach did a full collection scan on every API call —
+    # O(n) cost that compounds with the triple-write bug.
     try:
         db        = get_firestore_client()
         chats_ref = db.collection("users").document(user_id).collection("chats")
-        docs      = chats_ref.stream()
-    except Exception as e:
-        print("⚠️ Error fetching chats:", e)
-        return []
+        docs = (
+            chats_ref
+            .where("user_message", "!=", None)   # only real chat docs, not test_result docs
+            .order_by("user_message")             # required for inequality filter
+            .order_by("timestamp", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+            .stream()
+        )
+    except Exception:
+        # Fallback: plain descending limit without the inequality filter
+        try:
+            db        = get_firestore_client()
+            chats_ref = db.collection("users").document(user_id).collection("chats")
+            docs = (
+                chats_ref
+                .order_by("timestamp", direction=firestore.Query.DESCENDING)
+                .limit(limit)
+                .stream()
+            )
+        except Exception as e:
+            print("⚠️ Error fetching chats:", e)
+            return []
 
     chat_list = []
     for doc in docs:
@@ -484,28 +533,17 @@ def get_conversation_history(user_id, limit=3):
             data            = doc.to_dict()
             user_message    = data.get("user_message")
             assistant_reply = data.get("assistant_reply")
-            timestamp       = data.get("timestamp")
             if not user_message or not assistant_reply:
                 continue
             chat_list.append({
                 "user_message":    user_message,
                 "assistant_reply": assistant_reply,
-                "timestamp":       timestamp,
             })
         except Exception:
             continue
 
-    def safe_timestamp(chat):
-        ts = chat.get("timestamp")
-        try:
-            if ts:
-                return ts.timestamp()
-        except Exception:
-            pass
-        return 0
-
-    chat_list.sort(key=safe_timestamp)
-    chat_list = chat_list[-limit:]
+    # Firestore returned newest-first; reverse for chronological order
+    chat_list.reverse()
 
     history = []
     for chat in chat_list:
@@ -553,11 +591,12 @@ def store_long_term_memory(user_id, memory_data):
             data = doc.to_dict()
             if data.get("relation") == relation and data.get("attribute") == attribute:
                 doc.reference.update({"value": value, "updated_at": firestore.SERVER_TIMESTAMP})
-                for chat_doc in (
-                    db.collection("users").document(user_id).collection("chats").stream()
-                ):
-                    chat_doc.reference.delete()
-                print("🧠 Memory updated and old chat history cleared.")
+                # ✅ FIX: Removed the chat-history wipe that was here.
+                # The old code deleted EVERY chat document whenever a family name was updated.
+                # This was unintentional and caused permanent data loss.
+                # The system prompt's "always trust important known facts" instruction
+                # already prevents the model from contradicting updated memories.
+                print("🧠 Memory updated.")
                 return
 
         memory_ref.add({
@@ -1234,9 +1273,20 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
             return {"reply": "You have no active reminders right now. 😊 Would you like to set one?", "risk_level": risk_level}
 
         reply_text = "आपके आने वाले रिमाइंडर! ⏰\n" if lang in ["Hindi", "Hinglish"] else "Here are your upcoming reminders! ⏰\n"
+        IST = pytz.timezone("Asia/Kolkata")
         for r in reminders:
-            raw_time     = r.get("time") or r.get("time_text")
-            display_time = raw_time.strftime("%I:%M %p") if hasattr(raw_time, "strftime") else str(raw_time)
+            # ✅ FIX: Check all three possible time fields; convert UTC timestamp to IST.
+            raw_time = r.get("scheduled_time") or r.get("time") or r.get("time_text")
+            if raw_time is None:
+                display_time = "unknown time"
+            elif hasattr(raw_time, "strftime"):
+                # Firestore Timestamp — stored in UTC, convert to IST for display
+                try:
+                    display_time = raw_time.astimezone(IST).strftime("%I:%M %p")
+                except Exception:
+                    display_time = raw_time.strftime("%I:%M %p")
+            else:
+                display_time = str(raw_time)
             reply_text  += f"• {r['task']} at {display_time}\n"
         reply_text += "\nक्या आप कुछ बदलना चाहते हैं? 😊" if lang in ["Hindi", "Hinglish"] else "\nLet me know if you need to change anything! 😊"
         return {"reply": reply_text, "risk_level": risk_level}
@@ -1257,8 +1307,18 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
                 return {"reply": "अभी आपका कोई आने वाला रिमाइंडर नहीं है। 😊 क्या मैं एक सेट करूं?", "risk_level": risk_level}
             return {"reply": "You have no upcoming reminders right now. 😊 Would you like me to set one?", "risk_level": risk_level}
 
-        raw_time     = next_reminder.get("time") or next_reminder.get("time_text")
-        display_time = raw_time.strftime("%I:%M %p") if hasattr(raw_time, "strftime") else str(raw_time)
+        # ✅ FIX: Check all three time fields; convert UTC Firestore timestamp to IST.
+        IST      = pytz.timezone("Asia/Kolkata")
+        raw_time = next_reminder.get("scheduled_time") or next_reminder.get("time") or next_reminder.get("time_text")
+        if raw_time is None:
+            display_time = "unknown time"
+        elif hasattr(raw_time, "astimezone"):
+            try:
+                display_time = raw_time.astimezone(IST).strftime("%I:%M %p")
+            except Exception:
+                display_time = raw_time.strftime("%I:%M %p")
+        else:
+            display_time = str(raw_time)
         if lang in ["Hindi", "Hinglish"]:
             return {
                 "reply": f"आपका अगला रिमाइंडर '{next_reminder['task']}' का है, {display_time} बजे। मैं आपका ख्याल रखूंगा! 😊",
@@ -1284,11 +1344,13 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
                     if lang in ["Hindi", "Hinglish"]:
                         return {"reply": "हो गया! 😊 आपका आखिरी रिमाइंडर हटा दिया है।", "risk_level": risk_level}
                     return {"reply": "Done! 😊 I've cancelled your last reminder.", "risk_level": risk_level}
-            deleted = delete_reminder_by_task(user_id, task_text)
-            if deleted:
+            # ✅ FIX: delete_reminder_by_task now returns the actual stored task name
+            # (or None if not found) so the reply echoes the real name, not the user's phrasing.
+            matched_name = delete_reminder_by_task(user_id, task_text)
+            if matched_name:
                 if lang in ["Hindi", "Hinglish"]:
-                    return {"reply": f"हो गया! 😊 '{task_text}' का रिमाइंडर हटा दिया है।", "risk_level": risk_level}
-                return {"reply": f"Done! 😊 I've removed the reminder for '{task_text}'.", "risk_level": risk_level}
+                    return {"reply": f"हो गया! 😊 '{matched_name}' का रिमाइंडर हटा दिया है।", "risk_level": risk_level}
+                return {"reply": f"Done! 😊 I've removed the reminder for '{matched_name}'.", "risk_level": risk_level}
             else:
                 if lang in ["Hindi", "Hinglish"]:
                     return {"reply": "हम्म, वो रिमाइंडर नहीं मिला। क्या आप नाम जाँच कर फिर से बताएंगे? 😊", "risk_level": risk_level}
@@ -1419,7 +1481,10 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
             if name_lines:
                 name = name_lines[0].replace("- Name:", "").strip().split()[0]
 
-        hour = datetime.now().hour
+        # ✅ FIX: Use IST time, not server UTC. Render servers run UTC so
+        # datetime.now().hour was giving the wrong time-of-day greeting.
+        IST  = pytz.timezone("Asia/Kolkata")
+        hour = datetime.now(IST).hour
         if lang in ["Hindi", "Hinglish"]:
             time_greet = "सुप्रभात" if hour < 12 else ("नमस्ते" if hour < 17 else "शुभ संध्या")
             reply_text = (
