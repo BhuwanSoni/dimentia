@@ -441,6 +441,46 @@ def parse_natural_reminder(user_message):
     # Step 7 — Final cleanup
     task = " ".join(task.split()).capitalize()
 
+    # ✅ NEW: Detect recurring type from natural language
+    # Supports English and Hinglish phrases for daily/weekly/monthly.
+    original_text = user_message.lower().strip()
+
+    is_daily = any(phrase in original_text for phrase in [
+        "every day", "everyday", "daily", "each day",
+        "har roz", "roz", "har din", "daily basis",
+        "every morning", "every evening", "every night",
+        "har subah", "har shaam", "har raat",
+    ])
+
+    is_weekly = any(phrase in original_text for phrase in [
+        "every week", "weekly", "each week",
+        "har hafte", "hafte mein",
+        "every monday", "every tuesday", "every wednesday",
+        "every thursday", "every friday", "every saturday", "every sunday",
+    ])
+
+    is_monthly = any(phrase in original_text for phrase in [
+        "every month", "monthly", "each month",
+        "har mahine", "mahine mein",
+    ])
+
+    if is_daily:
+        recurring_type = "daily"
+    elif is_weekly:
+        recurring_type = "weekly"
+    elif is_monthly:
+        recurring_type = "monthly"
+    else:
+        recurring_type = "none"
+
+    # ✅ Build display label — append recurring badge so user sees it in chat reply
+    recurring_label_map = {
+        "daily":   "🔁 Daily",
+        "weekly":  "📅 Weekly",
+        "monthly": "🗓 Monthly",
+        "none":    "",
+    }
+
     # Build display string
     ist_time     = reminder_time
     now_ist      = datetime.now(IST)
@@ -457,10 +497,15 @@ def parse_natural_reminder(user_message):
     time_label = ist_time.strftime("%I:%M %p")
     display    = f"{day_label} • {time_label}"
 
+    # Append recurring badge to display string if applicable
+    if recurring_type != "none":
+        display = f"{display} • {recurring_label_map[recurring_type]}"
+
     return {
-        "task":         task if task else "Reminder",
-        "time":         reminder_time,
-        "time_display": display,
+        "task":           task if task else "Reminder",
+        "time":           reminder_time,
+        "time_display":   display,
+        "recurring_type": recurring_type,   # ✅ NEW: passed to create_reminder
     }
 
 
@@ -925,26 +970,43 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
 
     if parsed:
         try:
+            recurring_type = parsed.get("recurring_type", "none")
             create_reminder(
                 user_id=user_id,
                 task=parsed["task"],
                 time_text=parsed["time"],
                 time_display=parsed["time_display"],
                 source="assistant",
-                recurring_type="none",
+                recurring_type=recurring_type,          # ✅ NOW PASSED CORRECTLY
                 user_timezone="Asia/Kolkata",
             )
             reasoning_used.append("reminder_parser")
             reasoning_used.append("rule")
+
+            # ✅ Build reply that tells user whether it's recurring
+            recurring_suffix_en = {
+                "daily":   " This will repeat every day. 🔁",
+                "weekly":  " This will repeat every week. 📅",
+                "monthly": " This will repeat every month. 🗓",
+                "none":    "",
+            }.get(recurring_type, "")
+
+            recurring_suffix_hi = {
+                "daily":   " यह हर रोज़ दोहराया जाएगा। 🔁",
+                "weekly":  " यह हर हफ्ते दोहराया जाएगा। 📅",
+                "monthly": " यह हर महीने दोहराया जाएगा। 🗓",
+                "none":    "",
+            }.get(recurring_type, "")
+
             if lang in ["Hindi", "Hinglish"]:
                 reply_text = (
                     f"बिल्कुल! 😊 मैं आपको '{parsed['task']}' के लिए "
-                    f"{parsed['time_display']} पर याद दिलाऊंगा। आप निश्चिंत रहें! 💙"
+                    f"{parsed['time_display']} पर याद दिलाऊंगा।{recurring_suffix_hi} आप निश्चिंत रहें! 💙"
                 )
             else:
                 reply_text = (
                     f"Got it! 😊 I'll remind you about '{parsed['task']}' "
-                    f"at {parsed['time_display']}. You can count on me!"
+                    f"at {parsed['time_display']}.{recurring_suffix_en} You can count on me!"
                 )
             return {"reply": reply_text, "risk_level": risk_level, "reasoning": ", ".join(reasoning_used)}
         except Exception as e:

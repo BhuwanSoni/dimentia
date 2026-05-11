@@ -16,10 +16,15 @@ scheduler.start()
 
 
 # ==========================================================
-# Utility: Parse Time
+# ✅ VALID RECURRING TYPES
 # ==========================================================
 
+VALID_RECURRING_TYPES = {"none", "daily", "weekly", "monthly", "custom"}
 
+
+# ==========================================================
+# Utility: Parse Time
+# ==========================================================
 
 def parse_time_to_utc(time_text, user_timezone="Asia/Kolkata"):
     """
@@ -33,9 +38,7 @@ def parse_time_to_utc(time_text, user_timezone="Asia/Kolkata"):
 
     if isinstance(time_text, datetime):
         if time_text.tzinfo is not None:
-            # ✅ Already aware (e.g. IST-aware from parse_natural_reminder)
             return time_text.astimezone(pytz.utc)
-        # Naive datetime → localize to IST then convert
         localized_time = local.localize(time_text)
         return localized_time.astimezone(pytz.utc)
 
@@ -58,48 +61,201 @@ def create_reminder(
     task,
     time_text,
     source="assistant",
-    recurring_type="none",
-    user_timezone="Asia/Kolkata",  # ✅ FIX: was "UTC" — caused time-shifted ghost reminders
-    time_display=None       # ✅ human-readable string for display (e.g. "8pm") — optional
+    recurring_type="none",          # ✅ none | daily | weekly | monthly | custom
+    user_timezone="Asia/Kolkata",
+    time_display=None,              # ✅ human-readable string (e.g. "8:00 AM") — optional
+    custom_days=None,               # ✅ for recurring_type="custom": list of weekday ints (0=Mon … 6=Sun)
 ):
+    """
+    Create a reminder in Firestore.
 
+    recurring_type values:
+      "none"    — one-time reminder
+      "daily"   — fires every day at the same time
+      "weekly"  — fires every week on the same weekday
+      "monthly" — fires every month on the same day-of-month
+      "custom"  — fires on specific weekdays (pass custom_days=[0,2,4] for Mon/Wed/Fri)
+    """
     db = get_firestore_client()
     reminder_id = str(uuid.uuid4())
 
+    # ✅ Sanitise recurring_type so bad values from the frontend don't slip through
+    if recurring_type not in VALID_RECURRING_TYPES:
+        print(f"⚠️ Invalid recurring_type '{recurring_type}' — defaulting to 'none'")
+        recurring_type = "none"
+
     scheduled_time = parse_time_to_utc(time_text, user_timezone)
 
-    # ✅ DEBUG: log the resolved time so you can verify IST→UTC conversion is correct
     print("REMINDER TIME:", scheduled_time)
     print("USER TIMEZONE:", user_timezone)
+    print("RECURRING TYPE:", recurring_type)
 
-    # time_text stored in Firestore should be a readable string, not a datetime object.
-    # Use time_display if provided, otherwise fall back to isoformat of scheduled_time.
     firestore_time_text = time_display if time_display else scheduled_time.strftime("%I:%M %p")
+
+    doc_data = {
+        "task":           task,
+        "title":          task,
+        "scheduled_time": scheduled_time,
+        "time":           scheduled_time,
+        "time_text":      firestore_time_text,
+        "timezone":       user_timezone,
+        "recurring_type": recurring_type,       # ✅ stored for Flutter to display badge
+        "completed":      False,
+        "source":         source,
+        "created_at":     firestore.SERVER_TIMESTAMP,
+        "last_modified":  firestore.SERVER_TIMESTAMP,
+        # ✅ NEW: missed-reminder tracking
+        "missed":         False,
+        "missed_at":      None,
+        "snoozed_until":  None,
+    }
+
+    # ✅ Store custom weekday list for "custom" recurring type
+    if recurring_type == "custom" and custom_days:
+        doc_data["custom_days"] = custom_days
 
     db.collection("users") \
         .document(user_id) \
         .collection("reminders") \
         .document(reminder_id) \
-        .set({
-    "task": task,
-    "title": task,  # ✅ ADD THIS LINE (IMPORTANT)
-    "scheduled_time": scheduled_time,
-    "time": scheduled_time,  # ✅ ADD THIS LINE (VERY IMPORTANT)
-    "time_text": firestore_time_text,
-    "timezone": user_timezone,
-    "recurring_type": recurring_type,
-    "completed": False,
-    "source": source,
-    "created_at": firestore.SERVER_TIMESTAMP,
-    "last_modified": firestore.SERVER_TIMESTAMP
-})
-
-    # ✅ FIX: Commented out — Flutter already schedules local notifications via
-    # the Firestore stream in ReminderPage. Running APScheduler here too causes
-    # duplicate / ghost notifications on every reminder.
-    # schedule_job(user_id, reminder_id, scheduled_time, recurring_type)
+        .set(doc_data)
 
     return reminder_id
+
+
+# ==========================================================
+# ✅ NEW: Snooze / Reschedule a Missed Reminder
+# ==========================================================
+
+def snooze_reminder(user_id, reminder_id, snooze_minutes=10):
+    """
+    Reschedule a reminder by snooze_minutes from now.
+    Flutter calls this after the user taps "Remind me again in 10 min".
+    """
+    db = get_firestore_client()
+    now_utc = datetime.now(pytz.utc)
+    snooze_time = now_utc + timedelta(minutes=snooze_minutes)
+
+    db.collection("users") \
+        .document(user_id) \
+        .collection("reminders") \
+        .document(reminder_id) \
+        .update({
+            "scheduled_time": snooze_time,
+            "time":           snooze_time,
+            "completed":      False,
+            "missed":         False,
+            "snoozed_until":  snooze_time,
+            "last_modified":  firestore.SERVER_TIMESTAMP,
+        })
+    return snooze_time
+
+
+# ==========================================================
+# ✅ NEW: Mark a Reminder as Missed
+# ==========================================================
+
+def mark_reminder_missed(user_id, reminder_id):
+    """
+    Mark a reminder as missed so Flutter can show the "You missed X" banner.
+    Called by the backend scheduler or by Flutter after detecting a past-due reminder.
+    """
+    db = get_firestore_client()
+    db.collection("users") \
+        .document(user_id) \
+        .collection("reminders") \
+        .document(reminder_id) \
+        .update({
+            "missed":        True,
+            "missed_at":     firestore.SERVER_TIMESTAMP,
+            "last_modified": firestore.SERVER_TIMESTAMP,
+        })
+    return True
+
+
+# ==========================================================
+# ✅ NEW: Reschedule Recurring Reminder After Completion
+#
+# For daily/weekly/monthly reminders, after the user completes
+# one occurrence we create the NEXT occurrence automatically so
+# the reminder stays alive in the Firestore stream.
+# ==========================================================
+
+def advance_recurring_reminder(user_id, reminder_id):
+    """
+    After a recurring reminder fires/completes, push its scheduled_time
+    forward by the correct interval and reset completed=False.
+    Returns the new scheduled_time (UTC datetime) or None if not recurring.
+    """
+    db = get_firestore_client()
+    ref = db.collection("users") \
+            .document(user_id) \
+            .collection("reminders") \
+            .document(reminder_id)
+
+    doc = ref.get()
+    if not doc.exists:
+        return None
+
+    data = doc.to_dict()
+    recurring_type = data.get("recurring_type", "none")
+    if recurring_type == "none":
+        return None
+
+    raw_time = data.get("scheduled_time") or data.get("time")
+    if raw_time is None:
+        return None
+
+    # Ensure aware datetime
+    st = raw_time
+    if hasattr(st, "tzinfo") and st.tzinfo is None:
+        st = pytz.utc.localize(st)
+
+    if recurring_type == "daily":
+        next_time = st + timedelta(days=1)
+    elif recurring_type == "weekly":
+        next_time = st + timedelta(weeks=1)
+    elif recurring_type == "monthly":
+        # Same day next month (handles month-length edge cases)
+        month = st.month + 1
+        year  = st.year + (1 if month > 12 else 0)
+        month = (month - 1) % 12 + 1
+        import calendar
+        max_day = calendar.monthrange(year, month)[1]
+        day = min(st.day, max_day)
+        next_time = st.replace(year=year, month=month, day=day)
+    elif recurring_type == "custom":
+        custom_days = data.get("custom_days", [])
+        next_time = _next_custom_day(st, custom_days)
+    else:
+        return None
+
+    ref.update({
+        "scheduled_time": next_time,
+        "time":           next_time,
+        "completed":      False,
+        "missed":         False,
+        "last_modified":  firestore.SERVER_TIMESTAMP,
+    })
+
+    print(f"🔁 Recurring reminder advanced: {reminder_id} → {next_time}")
+    return next_time
+
+
+def _next_custom_day(current_time, weekday_list):
+    """
+    Given a UTC datetime and a list of weekday ints (0=Mon…6=Sun),
+    return the next occurrence after current_time.
+    """
+    if not weekday_list:
+        return current_time + timedelta(weeks=1)
+
+    for days_ahead in range(1, 8):
+        candidate = current_time + timedelta(days=days_ahead)
+        if candidate.weekday() in weekday_list:
+            return candidate
+
+    return current_time + timedelta(weeks=1)
 
 
 # ==========================================================
@@ -107,7 +263,6 @@ def create_reminder(
 # ==========================================================
 
 def schedule_job(user_id, reminder_id, scheduled_time, recurring_type):
-
     if recurring_type == "daily":
         scheduler.add_job(
             trigger_reminder,
@@ -116,7 +271,6 @@ def schedule_job(user_id, reminder_id, scheduled_time, recurring_type):
             args=[user_id, reminder_id],
             next_run_time=scheduled_time
         )
-
     elif recurring_type == "weekly":
         scheduler.add_job(
             trigger_reminder,
@@ -125,7 +279,17 @@ def schedule_job(user_id, reminder_id, scheduled_time, recurring_type):
             args=[user_id, reminder_id],
             next_run_time=scheduled_time
         )
-
+    elif recurring_type == "monthly":
+        # APScheduler doesn't have a native "monthly" trigger —
+        # use cron trigger with day-of-month
+        scheduler.add_job(
+            trigger_reminder,
+            'cron',
+            day=scheduled_time.day,
+            hour=scheduled_time.hour,
+            minute=scheduled_time.minute,
+            args=[user_id, reminder_id],
+        )
     else:
         scheduler.add_job(
             trigger_reminder,
@@ -137,11 +301,9 @@ def schedule_job(user_id, reminder_id, scheduled_time, recurring_type):
 
 def trigger_reminder(user_id, reminder_id):
     print(f"⏰ Trigger reminder for user {user_id}, reminder {reminder_id}")
-    # Here later you can:
-    # - Send push notification
-    # - Send websocket event
-    # - Send mobile notification
-    # - Send assistant auto-message
+    # After triggering, advance recurring reminders so the next occurrence
+    # is ready in Firestore for Flutter to pick up via stream.
+    advance_recurring_reminder(user_id, reminder_id)
 
 
 # ==========================================================
@@ -158,14 +320,9 @@ def get_user_reminders(user_id, include_completed=False):
     if not include_completed:
         query = query.where("completed", "==", False)
 
-    # ✅ FIX: Order by scheduled_time so Flutter stream receives docs in
-    # chronological order. Without this, the orderBy('scheduled_time') in
-    # reminders.dart's getReminders() would work but the REST list endpoint
-    # returned unordered results.
     query = query.order_by("scheduled_time")
 
-    docs = query.stream()
-
+    docs  = query.stream()
     reminders = []
 
     for doc in docs:
@@ -182,8 +339,7 @@ def get_user_reminders(user_id, include_completed=False):
 
 def get_next_reminder(user_id):
     db = get_firestore_client()
-
-    now = datetime.now(pytz.utc)  # ✅ aware — matches UTC-aware scheduled_time for comparison
+    now = datetime.now(pytz.utc)
 
     docs = db.collection("users") \
         .document(user_id) \
@@ -198,15 +354,13 @@ def get_next_reminder(user_id):
         raw_time = data.get("scheduled_time") or data.get("time")
         if raw_time is None:
             continue
-        # ✅ FIX: Firestore DatetimeWithNanoseconds is timezone-aware (UTC).
-        # Ensure we always compare two aware datetimes to avoid TypeError.
         try:
             st = raw_time
             if hasattr(st, 'tzinfo') and st.tzinfo is None:
                 st = pytz.utc.localize(st)
             if st > now:
                 data["id"] = doc.id
-                data["scheduled_time"] = st  # normalise key
+                data["scheduled_time"] = st
                 upcoming.append(data)
         except Exception as e:
             print(f"⚠️ get_next_reminder comparison error for {doc.id}: {e}")
@@ -217,6 +371,47 @@ def get_next_reminder(user_id):
 
     upcoming.sort(key=lambda x: x["scheduled_time"])
     return upcoming[0]
+
+
+# ==========================================================
+# ✅ NEW: Get Missed Reminders
+# ==========================================================
+
+def get_missed_reminders(user_id):
+    """
+    Return all reminders that are past-due, not completed, and not yet
+    explicitly marked missed. Flutter uses this list to surface
+    "You missed X — remind again in 10 min?" banners.
+    """
+    db = get_firestore_client()
+    now = datetime.now(pytz.utc)
+
+    docs = db.collection("users") \
+        .document(user_id) \
+        .collection("reminders") \
+        .where("completed", "==", False) \
+        .stream()
+
+    missed = []
+    for doc in docs:
+        data = doc.to_dict()
+        raw_time = data.get("scheduled_time") or data.get("time")
+        if raw_time is None:
+            continue
+        try:
+            st = raw_time
+            if hasattr(st, "tzinfo") and st.tzinfo is None:
+                st = pytz.utc.localize(st)
+            # Past-due by more than 5 minutes and not snoozed
+            if st < now - timedelta(minutes=5):
+                data["id"] = doc.id
+                data["scheduled_time"] = st
+                missed.append(data)
+        except Exception as e:
+            print(f"⚠️ get_missed_reminders error for {doc.id}: {e}")
+            continue
+
+    return missed
 
 
 # ==========================================================
@@ -231,10 +426,13 @@ def complete_reminder(user_id, reminder_id):
         .collection("reminders") \
         .document(reminder_id) \
         .update({
-            "completed": True,
-            "completed_at": firestore.SERVER_TIMESTAMP,  # ✅ lets Flutter stream detect exact completion time
-            "last_modified": firestore.SERVER_TIMESTAMP
+            "completed":     True,
+            "completed_at":  firestore.SERVER_TIMESTAMP,
+            "last_modified": firestore.SERVER_TIMESTAMP,
         })
+
+    # ✅ For recurring reminders, advance to next occurrence automatically
+    advance_recurring_reminder(user_id, reminder_id)
 
     return True
 
@@ -293,8 +491,6 @@ def delete_reminder_by_task(user_id, task_text):
     for doc in docs:
         data = doc.to_dict()
         if task_text.lower() in data.get("task", "").lower():
-            # ✅ FIX: Return the actual stored task name so the caller can echo
-            # it back to the user, instead of echoing the raw user phrasing.
             actual_task = data.get("task", task_text)
             doc.reference.delete()
             return actual_task
