@@ -355,36 +355,10 @@ def parse_natural_reminder(user_message):
         )
 
     now_ist = datetime.now(IST)
-
-    # ✅ FIX: Track whether the user explicitly named a future day.
-    # 'tomorrow', 'kal', 'parso' already advanced `date` by +1/+2 days
-    # above, so reminder_time is intentionally in the future.
-    #
-    # Bug 1 - double-shift: 'remind me at 9am tomorrow' -> date = now+1
-    # (correct). But if 9am has already passed at the moment the server
-    # processes the request, reminder_time < now_ist was True -> old code
-    # added another day -> reminder landed the day AFTER tomorrow.
-    #
-    # Bug 2 - has_specific_date miss: DATE_KEYWORDS only contains month
-    # names and ordinal suffixes, NOT 'tomorrow'/'kal'/'parso'. So
-    # has_specific_date was False for these words, and the else-branch ran
-    # `+= timedelta(days=1)` instead of the year+1 branch -- double-shift.
-    explicit_future = any(
-        word in text for word in ["tomorrow", "kal", "parso", "next"]
-    )
-
     if reminder_time < now_ist:
-        if explicit_future:
-            # User explicitly said tomorrow/kal/parso -- date is already
-            # set correctly above. Do NOT shift further.
-            pass
-        elif has_specific_date:
-            # Named a specific calendar date that has passed this year --
-            # push to next year.
+        if has_specific_date:
             reminder_time = reminder_time.replace(year=now.year + 1)
         else:
-            # No explicit date (e.g. 'remind me at 9am') and time has
-            # already passed today -- move to tomorrow.
             reminder_time += timedelta(days=1)
 
     # Clean task text

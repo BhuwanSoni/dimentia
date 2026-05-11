@@ -1,0 +1,16 @@
+flask
+flask-cors
+gunicorn
+requests
+python-dotenv
+firebase-admin
+google-cloud-firestore
+groq
+xgboost
+numpy
+joblib
+python-dateutil
+pytz
+tzlocal
+apscheduler
+protobuf
