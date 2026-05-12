@@ -1254,6 +1254,8 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
     # Handles: "what are my reminders", "show reminders", etc.
     # Must run AFTER the reminder-creation parser (so "remind me..."
     # is caught first) but BEFORE the LLM fallback.
+    # Reads directly from users/{uid}/reminders — same Firestore
+    # collection Flutter writes to — using "isCompleted" field name.
     # ==========================================================
     show_reminder_phrases = [
         "what are my reminders",
@@ -1280,17 +1282,63 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
     ]
 
     if any(p in user_lower for p in show_reminder_phrases):
+
         try:
-            reminders = get_user_reminders(user_id, include_completed=False)
+            # Fetch ALL docs first (no filter) so we can see exact field names in logs.
+            # Once confirmed, swap .stream() for .where("isCompleted", "==", False).stream()
+            reminder_docs = (
+                db.collection("users")
+                .document(user_id)
+                .collection("reminders")
+                .where("isCompleted", "==", False)
+                .stream()
+            )
+
+            reminders = []
+
+            for doc in reminder_docs:
+                data = doc.to_dict()
+                print("REMINDER DATA:", data)  # ✅ DEBUG — check Render logs for real field names
+
+                task = (
+                    data.get("task")
+                    or data.get("title")
+                    or "Reminder"
+                )
+
+                recurring = data.get("recurring_type", "none")
+
+                raw_time = (
+                    data.get("scheduled_time")
+                    or data.get("time")
+                )
+
+                time_text = "Unknown time"
+
+                try:
+                    if raw_time:
+                        dt = raw_time.to_datetime()
+                        time_text = dt.astimezone(
+                            pytz.timezone("Asia/Kolkata")
+                        ).strftime("%b %d • %I:%M %p")
+                except Exception:
+                    pass
+
+                reminders.append({
+                    "task":           task,
+                    "time_text":      time_text,
+                    "recurring_type": recurring,
+                })
+
         except Exception as e:
-            print(f"⚠️ get_user_reminders error: {e}")
+            print("Reminder fetch error:", e)
             reminders = []
 
         if not reminders:
             if lang in ["Hindi", "Hinglish"]:
-                reply = "अभी आपका कोई सक्रिय रिमाइंडर नहीं है। 😊 नया रिमाइंडर सेट करने के लिए बस बताएं!"
+                reply = "अभी आपका कोई सक्रिय रिमाइंडर नहीं है 😊"
             else:
-                reply = "You don't have any active reminders right now. 😊 Just let me know if you'd like to set one!"
+                reply = "You don't have any active reminders right now 😊"
         else:
             recurring_badge = {
                 "daily":   " 🔁 Daily",
@@ -1299,24 +1347,17 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
             }
             if lang in ["Hindi", "Hinglish"]:
                 lines = ["📋 आपके रिमाइंडर:\n"]
-                for idx, rem in enumerate(reminders[:10], start=1):
-                    task      = rem.get("task", "Reminder")
-                    time_text = rem.get("time_text", "")
-                    recurring = rem.get("recurring_type", "none")
-                    badge     = recurring_badge.get(recurring, "")
-                    lines.append(f"{idx}. {task} — {time_text}{badge}")
             else:
                 lines = ["📋 Here are your reminders:\n"]
-                for idx, rem in enumerate(reminders[:10], start=1):
-                    task      = rem.get("task", "Reminder")
-                    time_text = rem.get("time_text", "")
-                    recurring = rem.get("recurring_type", "none")
-                    badge     = recurring_badge.get(recurring, "")
-                    lines.append(f"{idx}. {task} — {time_text}{badge}")
+
+            for idx, rem in enumerate(reminders[:10], start=1):
+                badge = recurring_badge.get(rem["recurring_type"], "")
+                lines.append(f"{idx}. {rem['task']} — {rem['time_text']}{badge}")
+
             reply = "\n".join(lines)
 
         save_chat_message(db, user_id, user_message, reply, risk_level)
-        return {"reply": reply, "risk_level": risk_level, "reasoning": "reminder_list"}
+        return {"reply": reply, "risk_level": risk_level, "reasoning": "firestore_reminder_list"}
 
     # ==========================================================
     # 1️⃣  Extract & Store Object/General Memory
