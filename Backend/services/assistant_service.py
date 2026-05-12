@@ -1296,6 +1296,7 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
 
             for doc in reminder_docs:
                 data = doc.to_dict()
+                print(f"REMINDER DOC: {list(data.keys())} | {data}")  # DEBUG
 
                 task = (
                     data.get("task")
@@ -1305,21 +1306,33 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
 
                 recurring = data.get("recurring_type", "none")
 
+                # Try every common Flutter timestamp field name
                 raw_time = (
-                    data.get("scheduled_time")
+                    data.get("scheduledTime")
+                    or data.get("scheduled_time")
+                    or data.get("dateTime")
+                    or data.get("reminderTime")
                     or data.get("time")
+                    or data.get("date")
+                    or data.get("timestamp")
                 )
 
                 time_text = "Unknown time"
 
                 try:
                     if raw_time:
-                        dt = raw_time.to_datetime()
-                        time_text = dt.astimezone(
-                            pytz.timezone("Asia/Kolkata")
-                        ).strftime("%b %d • %I:%M %p")
-                except Exception:
-                    pass
+                        if hasattr(raw_time, "to_datetime"):
+                            dt = raw_time.to_datetime()
+                        elif hasattr(raw_time, "astimezone"):
+                            dt = raw_time
+                        else:
+                            dt = None
+                        if dt:
+                            time_text = dt.astimezone(
+                                pytz.timezone("Asia/Kolkata")
+                            ).strftime("%b %d • %I:%M %p")
+                except Exception as te:
+                    print(f"time parse error: {te} | raw={raw_time}")
 
                 reminders.append({
                     "task":           task,
