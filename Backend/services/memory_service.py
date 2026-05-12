@@ -383,6 +383,25 @@ def extract_memory(user_message: str):
                 "is_active":  True,
             }
 
+    # ── Pattern D: pronoun-led location update ───────────────
+    # Handles "now it is in locker", "it is on the table",
+    # "its in almirah", "now its in the drawer", "it's in locker" etc.
+    # The actual object is not stated — the caller must resolve
+    # via get_pending_object(user_id) or the last chat query context.
+    pat_d = (
+        r"^(?:now\s+)?(?:it(?:'?s)?|this|that)\s+"
+        r"(?:is\s+)?"
+        + LOCATION_PREP_PATTERN
+        + r"\s+(?:the\s+)?(.+)"
+    )
+    m = re.search(pat_d, text)
+    if m:
+        return {
+            "type":     "pending_resolution",   # caller must supply the object
+            "relation": normalize_relation(m.group(1).strip()),
+            "location": normalize_location(m.group(2).strip()),
+        }
+
     # ── General Note ──────────────────────────────────────────
     if text.startswith("remember that"):
         return {
@@ -781,4 +800,4 @@ def get_all_memories(user_id):
         elif data.get("type") == "general_note":
             out.append(f"Note: {data['value']}")
 
-    return out  
+    return out

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
@@ -792,7 +791,19 @@ User Profile:
                 child: CircleAvatar(
                   radius: 20,
                   backgroundColor: Colors.white,
-                  child: SvgPicture.asset('assets/images/chatbot1.svg', width: 24),
+                  child: ClipOval(
+                    child: Image.asset(
+                      'assets/images/logo.png',
+                      width: 30,
+                      height: 30,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.psychology_rounded,
+                        color: Color(0xFF2D6A4F),
+                        size: 24,
+                      ),
+                    ),
+                  ),
                 ),
               ),
               Positioned(
@@ -1327,29 +1338,39 @@ class _FindItemsChatCardState extends State<_FindItemsChatCard> {
             ),
           ),
 
-        // Items
-        ...filtered.asMap().entries.map((entry) {
-          final i    = entry.key;
-          final item = entry.value;
+        // ✅ FIX: Items — use ConstrainedBox + ListView.builder instead of
+        // spreading into the parent Column. The old spread approach worked for
+        // ≤2 items but silently clipped item 3+ because the card Column has no
+        // bounded height, causing Flutter to overflow without any visible error.
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 280), // ~4 tiles
+          child: ListView.builder(
+            shrinkWrap: true,
+            physics: filtered.length > 4
+                ? const ClampingScrollPhysics()        // scrollable when many items
+                : const NeverScrollableScrollPhysics(), // static when few
+            itemCount: filtered.length,
+            itemBuilder: (_, i) {
+              final item       = filtered[i];
+              final rawName    = item['object_name'] ?? item['identifier'] ?? '';
+              final identifier = item['identifier']  ?? '';
+              final location   = item['location']    ?? 'Unknown';
 
-          final rawName    = item['object_name'] ?? item['identifier'] ?? '';
-          final identifier = item['identifier']  ?? '';
-          final location   = item['location']    ?? 'Unknown';
+              // Display label: "black wallet" or just "wallet"
+              final displayName = identifier.isNotEmpty &&
+                      identifier.toLowerCase() != rawName.toLowerCase()
+                  ? '$identifier $rawName'
+                  : rawName;
 
-          // Display label: "black wallet" or just "wallet"
-          final displayName = identifier.isNotEmpty && identifier.toLowerCase() != rawName.toLowerCase()
-              ? '$identifier $rawName'
-              : rawName;
-
-          final isLast = i == filtered.length - 1;
-
-          return _ItemTile(
-            displayName: displayName,
-            location:    location,
-            isLast:      isLast,
-            onTap:       () => widget.onItemTap(displayName),
-          );
-        }),
+              return _ItemTile(
+                displayName: displayName,
+                location:    location,
+                isLast:      i == filtered.length - 1,
+                onTap:       () => widget.onItemTap(displayName),
+              );
+            },
+          ),
+        ),
 
         const SizedBox(height: 8),
       ],

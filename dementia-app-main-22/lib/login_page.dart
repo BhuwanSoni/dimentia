@@ -427,11 +427,41 @@ class _LoginPageState extends State<LoginPage>
                     children: [
                       const SizedBox(height: 100),
 
-                      // ── Logo ──────────────────────────────────────
-                      Image.asset(
-                        'assets/images/logo.png',
-                        width: 72,
-                        height: 72,
+                      // ── Logo + app name ───────────────────────────
+                      Row(
+                        children: [
+                          Image.asset(
+                            'assets/images/logo.png',
+                            width: 72,
+                            height: 72,
+                          ),
+                          const SizedBox(width: 14),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: const [
+                              Text(
+                                'Memoir',
+                                style: TextStyle(
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.w800,
+                                  color: _forest,
+                                  letterSpacing: -0.5,
+                                  height: 1.1,
+                                ),
+                              ),
+                              Text(
+                                'Memory Companion',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: _textMid,
+                                  letterSpacing: 0.1,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
 
                       const SizedBox(height: 28),

@@ -534,15 +534,43 @@ User Profile:
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            IconButton(
-                              icon: const Icon(Icons.menu,
-                                  color: Colors.white, size: 28),
-                              onPressed: () {
-                                if (!mounted) return;
-                                Scaffold.of(scaffoldContext).openDrawer();
-                              },
+                            // ── Top bar: menu + Memoir branding ──────
+                            Row(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.menu,
+                                      color: Colors.white, size: 28),
+                                  onPressed: () {
+                                    if (!mounted) return;
+                                    Scaffold.of(scaffoldContext).openDrawer();
+                                  },
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                ),
+                                const SizedBox(width: 8),
+                                Image.asset(
+                                  'assets/images/logo.png',
+                                  width: 34,
+                                  height: 34,
+                                  errorBuilder: (_, __, ___) => const Icon(
+                                    Icons.psychology_rounded,
+                                    color: Colors.white,
+                                    size: 34,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                const Text(
+                                  'Memoir',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 5),
+                            const SizedBox(height: 8),
                             Text(
                               _getGreeting(l),
                               style: TextStyle(
