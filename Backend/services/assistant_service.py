@@ -21,6 +21,11 @@ from services.memory_service import (
     clear_pending_object,
     update_object_location,
     increment_memory_confidence,
+    delete_object_memory,
+    normalize_object,
+    normalize_location,
+    object_verb,
+    format_location_reply,
 )
 from services.reminder_service import (
     create_reminder,
@@ -53,6 +58,24 @@ def validate_groq_key():
             "GROQ_API_KEY is not set. Add it to your Render environment variables."
         )
     print("[OK] GROQ_API_KEY loaded successfully.")
+
+
+# Fix #5: Centralized chat history writer — use this EVERYWHERE instead of
+# inlining db.collection("chats").add(...) so duplicates can never arise.
+def save_chat_message(db, user_id, user_message, assistant_reply, risk_level):
+    """
+    Write a single chat record to Firestore.
+    All branches in generate_response must call this instead of writing inline.
+    """
+    try:
+        db.collection("users").document(user_id).collection("chats").add({
+            "user_message":    user_message,
+            "assistant_reply": assistant_reply,
+            "risk_level":      risk_level,
+            "timestamp":       firestore.SERVER_TIMESTAMP,
+        })
+    except Exception as e:
+        print(f"⚠️ save_chat_message error: {e}")
 
 
 def call_groq(messages, temperature=0.7, max_tokens=256):
@@ -132,8 +155,9 @@ except Exception as e:
 
 def get_stored_items(user_id):
     """
-    Return all object memories for a user as a list of dicts.
-    Used by the Flutter 'Find my item' bottom sheet.
+    Return all ACTIVE object memories for a user as a list of dicts,
+    sorted by confidence (desc) and deduplicated by normalized object+identifier.
+    Used by the Flutter 'Find my item' bottom sheet via /get-stored-items endpoint.
     """
     try:
         db   = get_firestore_client()
@@ -141,20 +165,48 @@ def get_stored_items(user_id):
             db.collection("users")
               .document(user_id)
               .collection("long_term_memory")
-              .where("type", "==", "object_location")
+              .where("type",      "==", "object_location")
+              .where("is_active", "==", True)        # ✅ only active entries
               .stream()
         )
-        items = []
+        items     = []
+        seen_keys = {}   # normalized_obj|identifier -> index in items
+
         for doc in docs:
             data = doc.to_dict()
-            if data:
+            if not data:
+                continue
+
+            raw_obj    = data.get("object") or data.get("object_name") or data.get("identifier", "")
+            obj_norm   = normalize_object(raw_obj)
+            identifier = normalize_object(data.get("identifier", ""))
+            location   = normalize_location(data.get("location", "Unknown"))
+            relation   = data.get("relation", "in")
+            confidence = data.get("confidence", 1)
+
+            dedup_key = f"{obj_norm}|{identifier}"
+
+            if dedup_key in seen_keys:
+                idx = seen_keys[dedup_key]
+                if confidence > items[idx]["confidence"]:
+                    items[idx] = {
+                        "object_name": obj_norm,
+                        "identifier":  identifier,
+                        "relation":    relation,
+                        "location":    location,
+                        "confidence":  confidence,
+                    }
+            else:
+                seen_keys[dedup_key] = len(items)
                 items.append({
-                    # memory_service.py stores key as 'object'; support legacy 'object_name' too
-                    "object_name": data.get("object") or data.get("object_name") or data.get("identifier", ""),
-                    "identifier":  data.get("identifier", ""),
-                    "location":    data.get("location", "Unknown"),
-                    "confidence":  data.get("confidence", 1),
+                    "object_name": obj_norm,
+                    "identifier":  identifier,
+                    "relation":    relation,      # ✅ included so Flutter can say "inside drawer"
+                    "location":    location,
+                    "confidence":  confidence,
                 })
+
+        items.sort(key=lambda x: x.get("confidence", 1), reverse=True)
         return items
     except Exception as e:
         print(f"⚠️ get_stored_items error: {e}")
@@ -228,13 +280,14 @@ def parse_natural_reminder(user_message):
     ]
     is_hindi = any(word in text for word in hindi_words)
 
-    if not any(
+    # ✅ FIX: "appointment", "meeting", "doctor" removed from the primary trigger list.
+    # These words alone can appear in past-tense or question phrasing that is NOT a
+    # reminder request (e.g. "I had a doctor appointment yesterday").
+    # They are now handled below with a future-time guard.
+    has_reminder_verb = any(
         word in text
         for word in [
-            # English — all natural phrasings a user might say
             "remind", "reminder", "reminders",
-            "appointment", "meeting", "doctor",
-            # Common synonyms the parser was missing
             "make a reminder", "make reminder",
             "add a reminder", "add reminder",
             "create a reminder", "create reminder",
@@ -243,7 +296,19 @@ def parse_natural_reminder(user_message):
             "please remind", "can you remind",
             "don't forget", "don't let me forget",
         ]
-    ) and not is_hindi:
+    )
+
+    # "appointment / meeting / doctor" only trigger the parser when paired with a
+    # future-time indicator — prevents "I had a doctor appointment yesterday" from
+    # being parsed as a reminder request.
+    appointment_words = ["appointment", "meeting", "doctor"]
+    has_appointment   = any(w in text for w in appointment_words)
+    has_future_time   = any(w in text for w in [
+        "tomorrow", "kal", "next", "tonight", "today",
+        "am", "pm", "baje", "subah", "shaam", "raat",
+    ]) or bool(re.search(r'\d{1,2}(:\d{2})?\s*(am|pm|baje)', text))
+
+    if not has_reminder_verb and not (has_appointment and has_future_time) and not is_hindi:
         return None
 
     # ✅ FIX: Block question-style "remind me" phrasing — these are memory queries,
@@ -319,7 +384,19 @@ def parse_natural_reminder(user_message):
             period = g2  # directly "am" or "pm"
 
         if not period:
-            period = "am" if "subah" in text else "pm"
+            # Fix #7: Default AM/PM by hour range when no explicit am/pm given.
+            # Hours 1–6  → PM (lunch/afternoon/evening common for reminders)
+            # Hours 7–11 → AM (morning routine)
+            # Hour 12    → PM (noon)
+            # Others     → use context word or PM as safe default
+            if "subah" in text:
+                period = "am"
+            elif 1 <= hour <= 6:
+                period = "pm"
+            elif 7 <= hour <= 11:
+                period = "am"
+            else:
+                period = "pm"
 
         if period in ("pm", "baje") and hour != 12:
             hour += 12
@@ -543,34 +620,21 @@ def clear_pending_completion(user_id):
 
 
 def get_conversation_history(user_id, limit=3):
-    # ✅ FIX: Use Firestore .order_by().limit() instead of fetching ALL docs and
-    # sorting in Python. Old approach did a full collection scan on every API call —
-    # O(n) cost that compounds with the triple-write bug.
+    # ✅ FIX: Plain descending timestamp query — no composite index needed.
+    # Null user_message docs are filtered in Python to avoid the inequality
+    # filter that previously required a composite index and caused random failures.
     try:
         db        = get_firestore_client()
         chats_ref = db.collection("users").document(user_id).collection("chats")
         docs = (
             chats_ref
-            .where("user_message", "!=", None)   # only real chat docs, not test_result docs
-            .order_by("user_message")             # required for inequality filter
             .order_by("timestamp", direction=firestore.Query.DESCENDING)
-            .limit(limit)
+            .limit(limit * 2)   # fetch extra to account for null-filtered docs
             .stream()
         )
-    except Exception:
-        # Fallback: plain descending limit without the inequality filter
-        try:
-            db        = get_firestore_client()
-            chats_ref = db.collection("users").document(user_id).collection("chats")
-            docs = (
-                chats_ref
-                .order_by("timestamp", direction=firestore.Query.DESCENDING)
-                .limit(limit)
-                .stream()
-            )
-        except Exception as e:
-            print("⚠️ Error fetching chats:", e)
-            return []
+    except Exception as e:
+        print("⚠️ Error fetching chats:", e)
+        return []
 
     chat_list = []
     for doc in docs:
@@ -579,11 +643,13 @@ def get_conversation_history(user_id, limit=3):
             user_message    = data.get("user_message")
             assistant_reply = data.get("assistant_reply")
             if not user_message or not assistant_reply:
-                continue
+                continue   # skip test/null docs
             chat_list.append({
                 "user_message":    user_message,
                 "assistant_reply": assistant_reply,
             })
+            if len(chat_list) >= limit:
+                break
         except Exception:
             continue
 
@@ -776,9 +842,18 @@ def adapt_response_by_risk(reply, risk_level):
 def detect_language(text):
     if re.search(r'[अ-ह]', text):
         return "Hindi"
+    # Fix #6: Expanded Hinglish word list to catch common missed cases
     hinglish_words = [
         "mujhe", "hai", "karna", "kal", "aaj", "dawa", "pani",
         "kahan", "kaha", "mera", "meri", "mere", "nahi", "haan",
+        # Newly added — Fix #6
+        "rakha", "rakhe", "rakhi",
+        "specs", "chashma",
+        "dhundo", "dhundho",
+        "mil nahi", "milta nahi",
+        "karo", "karo na", "batao", "dikhao",
+        "subah", "shaam", "raat",
+        "baje", "baja",
     ]
     if any(word in text.lower() for word in hinglish_words):
         return "Hinglish"
@@ -838,21 +913,35 @@ def _deduplicated(memories):
 
 def _full_fuzzy_scan(db, user_id, query):
     """
-    Tier 3: Scan ALL docs in object_memories.
+    Tier 3: Scan active object_location docs in long_term_memory.
     A doc is a match if ANY query token appears in the combined
     object_name + identifier + location string (case-insensitive).
+
+    Fix #3: Archived memories (is_active=False) are now explicitly skipped.
+    Fix #4: Firestore query now filters on type + is_active and applies a
+            limit(50) to prevent expensive full-collection scans at scale.
     """
     query_norm  = _normalize(query)
     query_words = set(query_norm.split())
     if not query_words:
         return []
 
+    # Fix #4 — FIRESTORE COMPOSITE INDEX NOTE:
+    # The query below uses two equality filters (type + is_active).
+    # Firestore requires a composite index for multi-field queries on
+    # sub-collections.  Create this index in the Firebase Console:
+    #   Collection: long_term_memory
+    #   Fields: type (ASC), is_active (ASC)
+    # Or add to firestore.indexes.json and deploy with `firebase deploy --only firestore`.
+    # Without the index, this query will throw an FAILED_PRECONDITION error.
     try:
         docs = (
             db.collection("users")
               .document(user_id)
               .collection("long_term_memory")
-              .where("type", "==", "object_location")
+              .where("type",      "==", "object_location")
+              .where("is_active", "==", True)
+              .limit(50)
               .stream()
         )
     except Exception as e:
@@ -866,19 +955,29 @@ def _full_fuzzy_scan(db, user_id, query):
             if not data:
                 continue
 
+            # Double-check is_active in Python for safety
+            if not data.get("is_active", True):   # Fix #3
+                continue
+
             # Support both 'object' (memory_service key) and legacy 'object_name'
             obj_name   = _normalize(data.get("object") or data.get("object_name") or data.get("identifier") or "")
             identifier = _normalize(data.get("identifier")   or "")
             location   = _normalize(data.get("location")     or "")
             combined   = f"{obj_name} {identifier} {location}".strip()
 
-            hit = (query_norm in combined) or any(w in combined for w in query_words)
+            # ✅ FIX: Token-boundary matching — prevents false positives like
+            # "card" matching "postcard" or "pen" matching "pencil".
+            # Old:  any(w in combined for w in query_words)
+            # New:  token-set intersection (exact whole-word matches only)
+            combined_tokens = set(combined.split())
+            hit = bool(query_words.intersection(combined_tokens)) or (query_norm == combined)
 
             if hit:
                 results.append({
                     "object_name": data.get("object") or data.get("object_name") or data.get("identifier", ""),
                     "identifier":  data.get("identifier",  ""),
                     "location":    data.get("location",    "Unknown"),
+                    "relation":    data.get("relation",    "in"),
                     "confidence":  data.get("confidence",  1),
                     "doc_id":      doc.id,
                 })
@@ -893,6 +992,57 @@ def _full_fuzzy_scan(db, user_id, query):
     return results
 
 
+def _spell_correct_object_word(word: str) -> str:
+    """
+    Fix #1 (spell-correct scope): Correct a SINGLE WORD only if it looks
+    like a misspelled known-object name.
+
+    Safety rules that prevent over-correction of identifiers such as
+    "ram", "aadhar", "john", "office":
+      - Words in NEVER_CORRECT are always returned as-is.
+      - Words shorter than 4 chars are returned as-is (already exact or
+        too short to correct reliably).
+      - Correction threshold raised to 85 (from 80) to reduce false
+        positives on similar-length words.
+      - If the matched object name is more than 2 chars shorter than the
+        query word we skip it (e.g. "happiness" -> "bag" is implausible).
+    """
+    NEVER_CORRECT = {
+        "ram", "john", "aadhar", "adhar", "pan", "office",
+        "red", "blue", "black", "white", "green",
+        "big", "small", "old", "new",
+        "work", "home", "house", "room", "door", "desk",
+        "top", "side", "back", "left", "right",
+        "main", "front", "inner", "outer", "upper",
+    }
+    if word in NEVER_CORRECT or len(word) < 4:
+        return word
+    try:
+        from rapidfuzz import process as rfprocess
+        from services.memory_service import KNOWN_OBJECTS
+        result = rfprocess.extractOne(word, list(KNOWN_OBJECTS), score_cutoff=85)
+        if result:
+            corrected = result[0]
+            if len(word) - len(corrected) > 2:   # implausible match — too short
+                return word
+            if corrected != word:
+                print(f"🔤 Spell-corrected object token '{word}' -> '{corrected}'")
+                return corrected
+    except Exception:
+        pass
+    return word
+
+
+def _spell_correct_query(raw_query: str) -> str:
+    """
+    Fix #1: Only spell-correct tokens that look like misspelled object names.
+    Identifier words (names, adjectives, proper nouns) are left untouched
+    by the NEVER_CORRECT guard and the high threshold in
+    _spell_correct_object_word().
+    """
+    return " ".join(_spell_correct_object_word(w) for w in raw_query.split())
+
+
 def find_object_memories(db, user_id, raw_query):
     """
     Master retrieval — tries all three tiers, returns deduplicated results.
@@ -901,6 +1051,9 @@ def find_object_memories(db, user_id, raw_query):
     query = _normalize(raw_query)
     if not query:
         return []
+
+    # Apply targeted spell-correction (objects only, identifiers preserved)
+    query = _spell_correct_query(query)
 
     # Tier 1: exact normalized lookup
     memories = _safe_get_object_memories(user_id, query)
@@ -958,6 +1111,90 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
 
     # ── Reasoning trace — built up as we route through the function ──────────
     reasoning_used = []
+
+    # ==========================================================
+    # 0️⃣  Structured Memory Update Confirmation (HIGHEST PRIORITY)
+    # Must run before reminder parser and memory extraction so that a
+    # user replying "yes" / "haan" to a conflict question is resolved
+    # immediately and not misrouted by another intent detector.
+    # ✅ FIX: Block now runs first; also includes 5-minute expiry guard.
+    # ==========================================================
+    PENDING_MEM_EXPIRY_SECONDS = 300   # 5 minutes
+    try:
+        pending_mem_doc = db.collection("users").document(user_id).collection("assistant_state") \
+            .document("pending_memory_update").get()
+        _pmu_raw = pending_mem_doc.to_dict() if pending_mem_doc.exists else None
+    except Exception as e:
+        print(f"⚠️ pending_memory_update fetch error: {e}")
+        _pmu_raw = None
+
+    pending_mem_update = None
+    if _pmu_raw:
+        # Expiry check — discard stale confirmation prompts
+        _pmu_created = _pmu_raw.get("created_at")
+        _pmu_expired = False
+        if _pmu_created is not None:
+            try:
+                from datetime import timezone as _tz
+                _age = (datetime.now(_tz.utc) - _pmu_created).total_seconds()
+                if _age > PENDING_MEM_EXPIRY_SECONDS:
+                    print(f"⏰ pending_memory_update expired after {_age:.0f}s — discarding.")
+                    _pmu_expired = True
+                    try:
+                        db.collection("users").document(user_id).collection("assistant_state") \
+                            .document("pending_memory_update").delete()
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"⚠️ pending_memory_update expiry check error: {e}")
+        if not _pmu_expired:
+            pending_mem_update = _pmu_raw
+
+    if pending_mem_update:
+        _mem_affirm  = ["yes", "yes please", "confirm", "haan", "ha", "ok", "okay",
+                        "update", "haan update karo", "bilkul", "sure", "theek hai"]
+        _mem_decline = ["no", "cancel", "nahi", "nope", "don't update",
+                        "mat badlo", "rakhne do", "chhoddo"]
+
+        if user_lower in _mem_affirm or any(a in user_lower for a in _mem_affirm):
+            try:
+                mem_data = pending_mem_update.get("memory_data", {})
+                store_memory(user_id, mem_data)
+                db.collection("users").document(user_id).collection("assistant_state") \
+                    .document("pending_memory_update").delete()
+                val  = mem_data.get("value",     "")
+                rel  = mem_data.get("relation",  "")
+                attr = mem_data.get("attribute", "")
+                if lang in ["Hindi", "Hinglish"]:
+                    _reply = f"हो गया! 😊 मैंने आपके {rel} का {attr} {val} अपडेट कर दिया है। 💙"
+                else:
+                    _reply = f"Done! 😊 I've updated your {rel}'s {attr} to {val}. 💙"
+                save_chat_message(db, user_id, user_message, _reply, risk_level)
+                return {"reply": _reply, "risk_level": risk_level, "reasoning": "memory_conflict_confirmed"}
+            except Exception as e:
+                print(f"⚠️ pending memory update apply error: {e}")
+
+        elif user_lower in _mem_decline or any(n in user_lower for n in _mem_decline):
+            try:
+                db.collection("users").document(user_id).collection("assistant_state") \
+                    .document("pending_memory_update").delete()
+            except Exception:
+                pass
+            if lang in ["Hindi", "Hinglish"]:
+                _reply = "ठीक है! 😊 मैंने पुरानी जानकारी ही रखी है। कोई बात नहीं! 💙"
+            else:
+                _reply = "No problem! 😊 I'll keep the information as it was. 💙"
+            save_chat_message(db, user_id, user_message, _reply, risk_level)
+            return {"reply": _reply, "risk_level": risk_level, "reasoning": "memory_conflict_declined"}
+
+        else:
+            # User said something unrelated — silently drop the stale confirmation
+            try:
+                db.collection("users").document(user_id).collection("assistant_state") \
+                    .document("pending_memory_update").delete()
+            except Exception:
+                pass
+            # Fall through to normal processing below
 
     # ==========================================================
     # 🔥 NATURAL LANGUAGE REMINDER
@@ -1023,34 +1260,71 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
 
     if memory_data:
         try:
-            store_memory(user_id, memory_data)
+            conflict_result = store_memory(user_id, memory_data)
         except Exception as e:
             print(f"⚠️ store_memory error: {e}")
+            conflict_result = None
+
+        # ✅ FIX: Structured memory conflict — confirm with user before overwriting.
+        # If the user says "my daughter's name is Priya" but we already have "Riya",
+        # ask for confirmation instead of silently overwriting.
+        if isinstance(conflict_result, dict) and conflict_result.get("conflict"):
+            rel     = conflict_result["relation"]
+            attr    = conflict_result["attribute"]
+            old_val = conflict_result["existing_value"]
+            new_val = conflict_result["new_value"]
+
+            # Store the pending update so the user's "yes" can confirm it
+            try:
+                db.collection("users").document(user_id).collection("assistant_state") \
+                    .document("pending_memory_update").set({
+                        "memory_data": {
+                            **memory_data,
+                            "confirmed": True,
+                        },
+                        "created_at": firestore.SERVER_TIMESTAMP,
+                    })
+            except Exception as e:
+                print(f"⚠️ pending_memory_update set error: {e}")
+
+            if lang in ["Hindi", "Hinglish"]:
+                conflict_reply = (
+                    f"मुझे पहले से याद है कि आपके {rel} का {attr} {old_val} है। "
+                    f"क्या मैं इसे {new_val} से बदल दूं? 😊"
+                )
+            else:
+                conflict_reply = (
+                    f"I currently remember your {rel}'s {attr} as {old_val}. "
+                    f"Should I update it to {new_val}? 😊"
+                )
+
+            save_chat_message(db, user_id, user_message, conflict_reply, risk_level)
+            return {"reply": conflict_reply, "risk_level": risk_level, "reasoning": "memory_conflict_check"}
 
         obj = memory_data.get("object") or memory_data.get("object_name") or memory_data.get("identifier", "item")
         loc = memory_data.get("location", "there")
+        rel = memory_data.get("relation", "in")
+
+        # ✅ FIX: use correct verb (are/is) and stored relation word (inside/on/near)
+        verb     = object_verb(obj)
+        loc_str  = format_location_reply(obj, rel, loc)
 
         reasoning_used.append("memory_extractor")
         reasoning_used.append("rule")
 
         if lang in ["Hindi", "Hinglish"]:
             confirm_reply = (
-                f"समझ गया! 😊 मैंने याद कर लिया कि आपका {obj} {loc} पर है। "
+                f"समझ गया! 😊 मैंने याद कर लिया कि आपका {obj} {loc_str} है। "
                 f"जब भी ढूंढना हो, बस पूछें! 💙"
             )
         else:
             confirm_reply = (
-                f"Got it! 😊 I've remembered that your {obj} is on the {loc}. "
+                f"Got it! 😊 I've remembered that your {obj} {verb} {loc_str}. "
                 f"Just ask me 'Where is my {obj}?' anytime! 💙"
             )
 
         try:
-            db.collection("users").document(user_id).collection("chats").add({
-                "user_message":    user_message,
-                "assistant_reply": confirm_reply,
-                "risk_level":      risk_level,
-                "timestamp":       firestore.SERVER_TIMESTAMP,
-            })
+            save_chat_message(db, user_id, user_message, confirm_reply, risk_level)
         except Exception as e:
             print(f"⚠️ chat history write error (memory confirm): {e}")
 
@@ -1176,11 +1450,16 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
                     (m for m in object_memories if m.get("identifier", "").lower() in user_lower),
                     object_memories[0],
                 )
-                update_object_location(user_id, pending_object, mem["identifier"], new_location)
+                update_object_location(
+                    user_id, pending_object, mem["identifier"], new_location,
+                    relation="in",
+                )
                 clear_pending_object(user_id)
                 display_name = mem.get("identifier", "").strip() or pending_object
+                verb         = object_verb(display_name)
+                loc_str      = format_location_reply(display_name, "in", new_location)
                 return {
-                    "reply": f"Got it! 😊 I've updated that for you. Your {display_name} is now on the {new_location}.",
+                    "reply": f"Got it! 😊 I've updated that for you. Your {display_name} {verb} now {loc_str}.",
                     "risk_level": risk_level,
                 }
         except Exception as e:
@@ -1196,26 +1475,101 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
                 clear_pending_object(user_id)
             else:
                 if "other" in user_lower and len(object_memories) > 1:
-                    mem = object_memories[-1]
+                    # ✅ FIX: "The other one" → pick the second-best candidate (index 1).
+                    # Old code used object_memories[-1] which picks the WEAKEST match
+                    # when there are 4+ memories. index[1] is always the second-best
+                    # (object_memories is sorted confidence DESC by _memory_sort_key).
+                    mem = object_memories[1]
                     increment_memory_confidence(user_id, mem)
                     clear_pending_object(user_id)
                     id_part = mem.get("identifier", "").strip()
                     label   = f"{id_part} {pending_object}".strip() if id_part else pending_object
+                    verb    = object_verb(label)
+                    loc_str = format_location_reply(label, mem.get("relation", "in"), mem["location"])
                     return {
-                        "reply": f"Of course! 😊 Your {label} is on the {mem['location']}.",
+                        "reply": f"Of course! 😊 Your {label} {verb} {loc_str}.",
                         "risk_level": risk_level,
                     }
+
+                user_words = set(re.sub(r'[^\w\s]', '', user_lower).split())
+
+                # ── Fix #2: Three-priority match order ────────────────────
+                # Priority 1 — Exact full-identifier match in user reply
+                # Priority 2 — ≥70% identifier token overlap (Fix #9 kept)
+                # Priority 3 — Highest confidence + most recent (recency)
+                # This prevents "the glasses" from randomly picking the wrong
+                # one when the user hasn't specified a distinguishing word.
+
+                # Pass 1: exact full identifier present in user reply
+                matched_mem = None
                 for mem in object_memories:
                     identifier = _normalize(mem.get("identifier", ""))
                     if identifier and identifier in user_lower:
-                        increment_memory_confidence(user_id, mem)
-                        clear_pending_object(user_id)
-                        return {
-                            "reply": f"Found it! 😊 Your {identifier} {pending_object} is on the {mem['location']}.",
-                            "risk_level": risk_level,
-                        }
+                        matched_mem = mem
+                        break
+
+                # Pass 2: ≥70% token overlap
+                if matched_mem is None:
+                    for mem in object_memories:
+                        identifier = _normalize(mem.get("identifier", ""))
+                        id_words   = set(identifier.split()) if identifier else set()
+                        if not id_words:
+                            continue
+                        overlap_pct = len(id_words.intersection(user_words)) / len(id_words)
+                        if overlap_pct >= 0.70:
+                            matched_mem = mem
+                            break
+
+                # Pass 3: recency + confidence fallback — only when user gave
+                # no distinguishing info (e.g. just said "the glasses").
+                # object_memories is already sorted confidence DESC, then
+                # timestamp DESC by get_object_memories(), so [0] is best.
+                if matched_mem is None and not user_words.difference(
+                    {"the", "one", "that", "it", "wala", "wali", "wale"}
+                ):
+                    # User said something generic — pick the most recently
+                    # confirmed / highest-confidence memory.
+                    matched_mem = object_memories[0]
+
+                if matched_mem is not None:
+                    identifier = _normalize(matched_mem.get("identifier", ""))
+                    increment_memory_confidence(user_id, matched_mem)
+                    clear_pending_object(user_id)
+                    loc_str = format_location_reply(
+                        identifier, matched_mem.get("relation", "in"), matched_mem["location"]
+                    )
+                    label = f"{identifier} {pending_object}".strip() if identifier else pending_object
+                    return {
+                        "reply": f"Found it! 😊 Your {label} {object_verb(label)} {loc_str}.",
+                        "risk_level": risk_level,
+                    }
         except Exception as e:
             print(f"⚠️ clarification resolver error: {e}")
+
+    # ==========================================================
+    # 🗑️  FORGET / DELETE OBJECT MEMORY  ✅ NEW
+    # ==========================================================
+    forget_pattern = r"(?:forget|remove|delete|clear)\s+(?:my\s+)?(.+?)(?:\s+location|\s+memory)?"
+    m_forget = re.search(forget_pattern, user_lower)
+    if m_forget and any(kw in user_lower for kw in [
+        "forget", "remove my", "delete my", "clear my",
+        "bhool jao", "hata do", "delete karo",
+    ]):
+        try:
+            obj_query = m_forget.group(1).strip()
+            deleted   = delete_object_memory(user_id, obj_query)
+            reasoning_used.append("memory_delete")
+            reasoning_used.append("rule")
+            if deleted:
+                if lang in ["Hindi", "Hinglish"]:
+                    return {"reply": f"ठीक है! 😊 मैंने आपके {obj_query} की जगह भूल गया। 💙", "risk_level": risk_level}
+                return {"reply": f"Done! 😊 I've forgotten the stored location for your {obj_query}. 💙", "risk_level": risk_level}
+            else:
+                if lang in ["Hindi", "Hinglish"]:
+                    return {"reply": f"मुझे आपके {obj_query} की कोई जगह याद नहीं थी। 😊", "risk_level": risk_level}
+                return {"reply": f"I didn't have a stored location for your {obj_query} anyway. 😊", "risk_level": risk_level}
+        except Exception as e:
+            print(f"⚠️ delete_object_memory error: {e}")
 
     # ==========================================================
     # 🔟  WHERE IS MY <OBJECT>? — Bulletproof Retrieval
@@ -1251,16 +1605,19 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
             if lang in ["Hindi", "Hinglish"]:
                 msg = f"मुझे आपके कई {object_name} मिले! 😊\n"
                 for mem in object_memories:
-                    id_part = mem.get("identifier", "").strip()
-                    label   = f"{id_part} {object_name}".strip() if id_part else object_name
-                    msg    += f"• आपका {label} {mem['location']} पर है।\n"
+                    id_part  = mem.get("identifier", "").strip()
+                    label    = f"{id_part} {object_name}".strip() if id_part else object_name
+                    loc_str  = format_location_reply(label, mem.get("relation", "in"), mem["location"])
+                    msg     += f"• आपका {label} {loc_str} है।\n"
                 msg += "\nआप किसके बारे में जानना चाहते हैं?"
             else:
                 msg = f"I found a few {object_name}s I'm keeping track of for you! 😊\n"
                 for mem in object_memories:
-                    id_part = mem.get("identifier", "").strip()
-                    label   = f"{id_part} {object_name}".strip() if id_part else object_name
-                    msg    += f"• Your {label} is on the {mem['location']}.\n"
+                    id_part  = mem.get("identifier", "").strip()
+                    label    = f"{id_part} {object_name}".strip() if id_part else object_name
+                    verb     = object_verb(label)
+                    loc_str  = format_location_reply(label, mem.get("relation", "in"), mem["location"])
+                    msg     += f"• Your {label} {verb} {loc_str}.\n"
                 msg += "\nWhich one were you looking for?"
             return {"reply": msg, "risk_level": risk_level, "reasoning": ", ".join(reasoning_used)}
 
@@ -1279,16 +1636,19 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
                 if id_part and id_part != object_name
                 else object_name
             )
-            location = mem.get("location", "there")
+            location  = mem.get("location", "there")
+            relation  = mem.get("relation", "in")
+            verb      = object_verb(display_name)
+            loc_str   = format_location_reply(display_name, relation, location)
 
             if lang in ["Hindi", "Hinglish"]:
                 return {
-                    "reply": f"मिल गया! 😊 आपका {display_name} {location} पर है। 💙",
+                    "reply": f"मिल गया! 😊 आपका {display_name} {loc_str} है। 💙",
                     "risk_level": risk_level,
                     "reasoning": ", ".join(reasoning_used),
                 }
             return {
-                "reply": f"Found it! 😊 Your {display_name} is on the {location}. 💙",
+                "reply": f"Found it! 😊 Your {display_name} {verb} {loc_str}. 💙",
                 "risk_level": risk_level,
                 "reasoning": ", ".join(reasoning_used),
             }
@@ -1663,16 +2023,9 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
     # NOTE: Flutter's chatbot_service.dart also writes to Firestore.
     # The backend write here is the authoritative record (assistant_reply key).
     # Flutter write is kept for offline resilience — both use "assistant_reply".
+    # Fix #5: Use centralized save_chat_message to prevent duplicate writes.
     # ==========================================================
-    try:
-        db.collection("users").document(user_id).collection("chats").add({
-            "user_message":    user_message,
-            "assistant_reply": reply,
-            "risk_level":      risk_level,
-            "timestamp":       firestore.SERVER_TIMESTAMP,
-        })
-    except Exception as e:
-        print(f"⚠️ chat history write error: {e}")
+    save_chat_message(db, user_id, user_message, reply, risk_level)
 
     return {
         "reply":     reply,
