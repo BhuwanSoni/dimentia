@@ -1254,8 +1254,6 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
     # Handles: "what are my reminders", "show reminders", etc.
     # Must run AFTER the reminder-creation parser (so "remind me..."
     # is caught first) but BEFORE the LLM fallback.
-    # Reads directly from users/{uid}/reminders — same Firestore
-    # collection Flutter writes to — using "isCompleted" field name.
     # ==========================================================
     show_reminder_phrases = [
         "what are my reminders",
@@ -1284,13 +1282,13 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
     if any(p in user_lower for p in show_reminder_phrases):
 
         try:
-            # Fetch ALL docs first (no filter) so we can see exact field names in logs.
-            # Once confirmed, swap .stream() for .where("isCompleted", "==", False).stream()
+            # Reads users/{uid}/reminders directly — same collection Flutter writes to.
+            # "completed" matches both Flutter (addReminder) and backend (create_reminder).
             reminder_docs = (
                 db.collection("users")
                 .document(user_id)
                 .collection("reminders")
-                .where("isCompleted", "==", False)
+                .where("completed", "==", False)
                 .stream()
             )
 
@@ -1298,7 +1296,6 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
 
             for doc in reminder_docs:
                 data = doc.to_dict()
-                print("REMINDER DATA:", data)  # ✅ DEBUG — check Render logs for real field names
 
                 task = (
                     data.get("task")
@@ -1331,7 +1328,7 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
                 })
 
         except Exception as e:
-            print("Reminder fetch error:", e)
+            print(f"⚠️ Reminder fetch error: {e}")
             reminders = []
 
         if not reminders:
