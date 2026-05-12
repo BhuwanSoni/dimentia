@@ -222,6 +222,57 @@ class _ChatScreenState extends State<ChatScreen> {
     });
     _scrollToBottom();
 
+    // ✅ LOCAL INTERCEPT: answer time/date questions instantly, no API call needed.
+    // This is faster, works offline, and never gives a wrong answer.
+    final lower = userInput.toLowerCase();
+    final now   = DateTime.now();
+
+    final _timeKeywords = [
+      'what time', 'current time', 'time now', 'time is it',
+      'abhi kitne baje', 'kitne baje', 'kya time', 'samay', 'waqt',
+    ];
+    final _dateKeywords = [
+      'what date', 'what day', 'today date', 'aaj kya', 'aaj kaun sa',
+      'date today', 'current date', 'which day', 'kaunsa din',
+      'aaj kon sa', 'aaj ki date',
+    ];
+
+    final bool isTimeQuery = _timeKeywords.any((k) => lower.contains(k));
+    final bool isDateQuery = _dateKeywords.any((k) => lower.contains(k));
+
+    if (isTimeQuery || isDateQuery) {
+      final timeStr = DateFormat('hh:mm a').format(now);
+      final dateStr = DateFormat('EEEE, MMMM d, yyyy').format(now);
+
+      String localReply;
+      if (isTimeQuery && isDateQuery) {
+        localReply = _isHindi
+            ? 'अभी $timeStr बज रहे हैं और आज $dateStr है। 😊'
+            : 'It\'s $timeStr right now, and today is $dateStr. 😊';
+      } else if (isTimeQuery) {
+        localReply = _isHindi
+            ? 'अभी $timeStr बज रहे हैं। 😊'
+            : 'The current time is $timeStr. 😊';
+      } else {
+        localReply = _isHindi
+            ? 'आज $dateStr है। 😊'
+            : 'Today is $dateStr. 😊';
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        messages.add({
+          'type':   _MessageType.text,
+          'sender': 'bot',
+          'text':   localReply,
+          'time':   DateTime.now(),
+        });
+      });
+      _scrollToBottom();
+      return; // ✅ skip API call entirely
+    }
+
     try {
       final settings    = SettingsProvider.of(context);
       final botResponse = await _chatbotService.sendMessage(

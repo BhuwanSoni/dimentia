@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart'; // ✅ for DateFormat
 
 class ChatbotService {
   final String _backendUrl = "https://dimentia.onrender.com/chat";
@@ -28,10 +29,16 @@ class ChatbotService {
       // ✅ Always send timezone so the backend reminder parser uses IST,
       // not the server's UTC default. This fixes ghost/shifted reminders
       // from both voice and chat code paths.
+      //
+      // ✅ Send live date/time so the backend can answer "what time is it"
+      // and "what day is today" accurately without relying on server UTC.
+      final now = DateTime.now();
       final Map<String, dynamic> requestBody = {
-        "message":  userMessage,
-        "user_id":  uid,
-        "timezone": "Asia/Kolkata",
+        "message":      userMessage,
+        "user_id":      uid,
+        "timezone":     "Asia/Kolkata",
+        "current_time": DateFormat('hh:mm a').format(now),        // e.g. "03:45 PM"
+        "current_date": DateFormat('EEEE, MMMM d, yyyy').format(now), // e.g. "Wednesday, May 13, 2026"
         if (profileText != null && profileText.isNotEmpty)
           "profile_text": profileText,
       };

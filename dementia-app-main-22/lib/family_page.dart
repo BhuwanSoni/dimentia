@@ -97,9 +97,10 @@ class _FamilyPageState extends State<FamilyPage> {
                   color: Colors.white,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                     // ── Handle bar ──────────────────────────────────────────
                     const SizedBox(height: 12),
                     Container(
@@ -355,6 +356,7 @@ class _FamilyPageState extends State<FamilyPage> {
                             16),
                   ],
                 ),
+                ), // SingleChildScrollView
               ),
             );
           },

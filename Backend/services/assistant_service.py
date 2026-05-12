@@ -1089,7 +1089,32 @@ def find_object_memories(db, user_id, raw_query):
 # 🚀 MAIN CHAT FUNCTION
 # =========================================================
 
-def generate_response(user_id, user_message, flutter_profile_text=""):
+def generate_response(user_id, user_message, flutter_profile_text="", current_time="", current_date=""):
+    """
+    Main chat handler.
+
+    Parameters
+    ----------
+    user_id            : Firestore user UID
+    user_message       : Raw text from the user
+    flutter_profile_text : Profile string built by the Flutter app (name, age, etc.)
+    current_time       : Local time string sent by Flutter, e.g. "03:45 PM"
+    current_date       : Local date string sent by Flutter, e.g. "Wednesday, May 13, 2026"
+
+    ⚠️  FLASK ROUTE NOTE — in app.py / main.py wherever you call this function,
+    read the new fields from the request JSON and pass them through:
+
+        data         = request.get_json()
+        current_time = data.get("current_time", "")
+        current_date = data.get("current_date", "")
+        result = generate_response(
+            user_id=data["user_id"],
+            user_message=data["message"],
+            flutter_profile_text=data.get("profile_text", ""),
+            current_time=current_time,
+            current_date=current_date,
+        )
+    """
 
     # Guard: empty / None input
     if not user_message or not str(user_message).strip():
@@ -2003,6 +2028,52 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
             )
         return {"reply": about_text, "risk_level": risk_level}
 
+
+    # ==========================================================
+    # ⏰ TIME / DATE INTERCEPT — answer instantly from Flutter-sent values
+    # Flutter sends current_time and current_date with every message so we
+    # never have to guess server UTC vs user local time.
+    # ==========================================================
+    time_triggers = [
+        "what time", "current time", "time now", "time is it",
+        "abhi kitne baje", "kitne baje", "kya time hai", "samay kya",
+        "waqt kya", "time bata", "samay batao",
+    ]
+    date_triggers = [
+        "what date", "what day", "today date", "aaj kya", "aaj kaun",
+        "date today", "current date", "which day", "kaunsa din",
+        "aaj ki date", "aaj kon sa", "aaj kya din", "din kya hai",
+    ]
+
+    _is_time_q = any(t in user_lower for t in time_triggers)
+    _is_date_q = any(t in user_lower for t in date_triggers)
+
+    if _is_time_q or _is_date_q:
+        # Use Flutter-sent values; fall back to IST server time if not provided
+        IST = pytz.timezone("Asia/Kolkata")
+        _now_ist = datetime.now(IST)
+        _t = current_time or _now_ist.strftime("%I:%M %p")
+        _d = current_date or _now_ist.strftime("%A, %B %-d, %Y")
+
+        if _is_time_q and _is_date_q:
+            if lang in ["Hindi", "Hinglish"]:
+                _reply = f"अभी {_t} बज रहे हैं और आज {_d} है। 😊"
+            else:
+                _reply = f"It's {_t} right now, and today is {_d}. 😊"
+        elif _is_time_q:
+            if lang in ["Hindi", "Hinglish"]:
+                _reply = f"अभी {_t} बज रहे हैं। 😊"
+            else:
+                _reply = f"The current time is {_t}. 😊"
+        else:
+            if lang in ["Hindi", "Hinglish"]:
+                _reply = f"आज {_d} है। 😊"
+            else:
+                _reply = f"Today is {_d}. 😊"
+
+        save_chat_message(db, user_id, user_message, _reply, risk_level)
+        return {"reply": _reply, "risk_level": risk_level, "reasoning": "local_time_intercept"}
+
     # ==========================================================
     # 🤖 GREETING INTERCEPT
     # ==========================================================
@@ -2068,8 +2139,24 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
 
     system_prompt = build_system_prompt(risk_level)
 
+    # ✅ Inject live date/time into the LLM context so the AI can reference
+    # it naturally ("your appointment is in 2 hours", "good afternoon", etc.)
+    IST = pytz.timezone("Asia/Kolkata")
+    _now_ist   = datetime.now(IST)
+    _live_time = current_time or _now_ist.strftime("%I:%M %p")
+    _live_date = current_date or _now_ist.strftime("%A, %B %-d, %Y")
+
     messages = [
         {"role": "system", "content": system_prompt},
+        {
+            "role": "system",
+            "content": (
+                f"Current Date: {_live_date}\n"
+                f"Current Time: {_live_time} (IST)\n"
+                "Use this to answer time/date questions accurately and to give "
+                "contextually appropriate greetings and reminders."
+            ),
+        },
         {
             "role": "system",
             "content": (
