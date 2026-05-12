@@ -1250,6 +1250,75 @@ def generate_response(user_id, user_message, flutter_profile_text=""):
             print(f"⚠️ create_reminder error: {e}")
 
     # ==========================================================
+    # 📋 SHOW USER REMINDERS
+    # Handles: "what are my reminders", "show reminders", etc.
+    # Must run AFTER the reminder-creation parser (so "remind me..."
+    # is caught first) but BEFORE the LLM fallback.
+    # ==========================================================
+    show_reminder_phrases = [
+        "what are my reminders",
+        "show my reminders",
+        "show reminders",
+        "my reminders",
+        "list reminders",
+        "list my reminders",
+        "upcoming reminders",
+        "what reminders do i have",
+        "do i have any reminders",
+        "reminders",
+        # Hindi / Hinglish
+        "mere reminders",
+        "mere reminder",
+        "mere sare reminders",
+        "mere upcoming reminders",
+        "meri reminders",
+        "reminder dikhao",
+        "reminders dikhao",
+        "reminder batao",
+        "kya reminder hai",
+        "kya reminders hain",
+    ]
+
+    if any(p in user_lower for p in show_reminder_phrases):
+        try:
+            reminders = get_user_reminders(user_id, include_completed=False)
+        except Exception as e:
+            print(f"⚠️ get_user_reminders error: {e}")
+            reminders = []
+
+        if not reminders:
+            if lang in ["Hindi", "Hinglish"]:
+                reply = "अभी आपका कोई सक्रिय रिमाइंडर नहीं है। 😊 नया रिमाइंडर सेट करने के लिए बस बताएं!"
+            else:
+                reply = "You don't have any active reminders right now. 😊 Just let me know if you'd like to set one!"
+        else:
+            recurring_badge = {
+                "daily":   " 🔁 Daily",
+                "weekly":  " 📅 Weekly",
+                "monthly": " 🗓 Monthly",
+            }
+            if lang in ["Hindi", "Hinglish"]:
+                lines = ["📋 आपके रिमाइंडर:\n"]
+                for idx, rem in enumerate(reminders[:10], start=1):
+                    task      = rem.get("task", "Reminder")
+                    time_text = rem.get("time_text", "")
+                    recurring = rem.get("recurring_type", "none")
+                    badge     = recurring_badge.get(recurring, "")
+                    lines.append(f"{idx}. {task} — {time_text}{badge}")
+            else:
+                lines = ["📋 Here are your reminders:\n"]
+                for idx, rem in enumerate(reminders[:10], start=1):
+                    task      = rem.get("task", "Reminder")
+                    time_text = rem.get("time_text", "")
+                    recurring = rem.get("recurring_type", "none")
+                    badge     = recurring_badge.get(recurring, "")
+                    lines.append(f"{idx}. {task} — {time_text}{badge}")
+            reply = "\n".join(lines)
+
+        save_chat_message(db, user_id, user_message, reply, risk_level)
+        return {"reply": reply, "risk_level": risk_level, "reasoning": "reminder_list"}
+
+    # ==========================================================
     # 1️⃣  Extract & Store Object/General Memory
     # ==========================================================
     try:
