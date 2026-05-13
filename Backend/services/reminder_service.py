@@ -104,10 +104,11 @@ def create_reminder(
         "source":         source,
         "created_at":     firestore.SERVER_TIMESTAMP,
         "last_modified":  firestore.SERVER_TIMESTAMP,
-        # ✅ NEW: missed-reminder tracking
+        # ✅ missed-reminder tracking
         "missed":         False,
         "missed_at":      None,
         "snoozed_until":  None,
+        "miss_count":     0,
     }
 
     # ✅ Store custom weekday list for "custom" recurring type
@@ -124,7 +125,7 @@ def create_reminder(
 
 
 # ==========================================================
-# ✅ NEW: Snooze / Reschedule a Missed Reminder
+# ✅ Snooze / Reschedule a Missed Reminder
 # ==========================================================
 
 def snooze_reminder(user_id, reminder_id, snooze_minutes=10):
@@ -152,29 +153,74 @@ def snooze_reminder(user_id, reminder_id, snooze_minutes=10):
 
 
 # ==========================================================
-# ✅ NEW: Mark a Reminder as Missed
+# ✅ Mark a Reminder as Missed + Fire FCM
 # ==========================================================
 
 def mark_reminder_missed(user_id, reminder_id):
     """
-    Mark a reminder as missed so Flutter can show the "You missed X" banner.
+    Mark a reminder as missed so Flutter can show the "You missed X" banner,
+    then fire an FCM push notification so the device is alerted even if the
+    app is in the background or closed.
+
+    Escalation: if the same reminder has been missed 3+ times, an emergency
+    FCM alert is sent (handled inside check_escalation).
+
     Called by the backend scheduler or by Flutter after detecting a past-due reminder.
     """
+    from services.fcm_service import send_fcm_to_user, check_escalation
+
     db = get_firestore_client()
-    db.collection("users") \
-        .document(user_id) \
-        .collection("reminders") \
-        .document(reminder_id) \
-        .update({
+    ref = (
+        db.collection("users")
+          .document(user_id)
+          .collection("reminders")
+          .document(reminder_id)
+    )
+
+    # Fetch reminder data so we can include the task name in the notification
+    try:
+        doc = ref.get()
+    except Exception as e:
+        print(f"⚠️ mark_reminder_missed: Firestore fetch failed: {e}")
+        return False
+
+    task = "your task"
+    if doc.exists:
+        task = doc.to_dict().get("task", "your task")
+
+    # Mark as missed in Firestore
+    try:
+        ref.update({
             "missed":        True,
             "missed_at":     firestore.SERVER_TIMESTAMP,
             "last_modified": firestore.SERVER_TIMESTAMP,
         })
+    except Exception as e:
+        print(f"⚠️ mark_reminder_missed: Firestore update failed: {e}")
+        return False
+
+    # Send FCM "missed" push notification
+    try:
+        send_fcm_to_user(
+            user_id=user_id,
+            title="🔔 Missed Reminder",
+            body=f'You missed: "{task}". Tap to snooze.',
+            alert_type="missed",
+        )
+    except Exception as e:
+        print(f"⚠️ mark_reminder_missed: FCM send failed: {e}")
+
+    # Increment miss_count and escalate to emergency if >= 3 misses
+    try:
+        check_escalation(user_id, reminder_id)
+    except Exception as e:
+        print(f"⚠️ mark_reminder_missed: check_escalation failed: {e}")
+
     return True
 
 
 # ==========================================================
-# ✅ NEW: Reschedule Recurring Reminder After Completion
+# ✅ Reschedule Recurring Reminder After Completion
 #
 # For daily/weekly/monthly reminders, after the user completes
 # one occurrence we create the NEXT occurrence automatically so
@@ -374,7 +420,7 @@ def get_next_reminder(user_id):
 
 
 # ==========================================================
-# ✅ NEW: Get Missed Reminders
+# ✅ Get Missed Reminders
 # ==========================================================
 
 def get_missed_reminders(user_id):
@@ -431,7 +477,9 @@ def complete_reminder(user_id, reminder_id):
             "last_modified": firestore.SERVER_TIMESTAMP,
         })
 
-    # ✅ For recurring reminders, advance to next occurrence automatically
+    # ✅ For recurring reminders, advance to next occurrence automatically.
+    # advance_recurring_reminder() is called ONLY here — never in reminder_routes.py —
+    # to prevent double-advancing (which would skip days).
     advance_recurring_reminder(user_id, reminder_id)
 
     return True

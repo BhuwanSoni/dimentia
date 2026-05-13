@@ -169,7 +169,7 @@ class NotificationService {
         tzTime,
         NotificationDetails(android: androidDetails),
         payload: payload,
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
       );
@@ -411,6 +411,29 @@ class NotificationService {
       _repeatingAlertRunning = false;
       debugPrint('✅ Repeating alert finished');
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // INSTANT NOTIFICATION  (for foreground FCM messages)
+  // ─────────────────────────────────────────────────────────────
+
+  static Future<void> showInstantNotification({
+    required String title,
+    required String body,
+  }) async {
+    await _notificationsPlugin.show(
+      DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      title,
+      body,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'reminder_channel',
+          'Reminders',
+          importance: Importance.max,
+          priority: Priority.high,
+        ),
+      ),
+    );
   }
 
   // ─────────────────────────────────────────────────────────────

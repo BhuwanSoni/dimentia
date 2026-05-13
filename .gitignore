@@ -29,7 +29,8 @@ venv/
 firebase_key.json
 Backend/firebase_key.json
 .env
-
+*.jks
+key.properties
 # =========================
 # DATA & ML
 # =========================

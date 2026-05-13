@@ -13,8 +13,8 @@ class Reminder {
   final String title;
   final DateTime time;
   final bool isCompleted;
-  final String recurringType; // ✅ NEW: none | daily | weekly | monthly | custom
-  final bool isMissed;        // ✅ NEW: true when backend marks it missed
+  final String recurringType; // none | daily | weekly | monthly | custom
+  final bool isMissed;
 
   Reminder({
     required this.id,
@@ -35,7 +35,6 @@ class FirestoreService {
 
   String get userId => _auth.currentUser!.uid;
 
-  // ✅ UPDATED: now accepts recurringType so manual reminders can also be recurring
   Future<DocumentReference> addReminder(
     String title,
     DateTime time, {
@@ -54,7 +53,7 @@ class FirestoreService {
       'completed':      false,
       'missed':         false,
       'source':         'manual',
-      'recurring_type': recurringType, // ✅ stored so backend can advance it
+      'recurring_type': recurringType,
     });
   }
 
@@ -65,6 +64,17 @@ class FirestoreService {
         .collection('reminders')
         .orderBy('scheduled_time')
         .snapshots();
+  }
+
+  /// Returns ALL non-completed reminders (for boot-recovery scheduling).
+  Future<List<QueryDocumentSnapshot>> getPendingReminders() async {
+    final snap = await _db
+        .collection('users')
+        .doc(userId)
+        .collection('reminders')
+        .where('completed', isEqualTo: false)
+        .get();
+    return snap.docs;
   }
 
   Future<void> toggleComplete(String id, bool value) async {
@@ -84,7 +94,7 @@ class FirestoreService {
         .doc(id)
         .get();
     if (!doc.exists) return null;
-    final data   = doc.data()!;
+    final data    = doc.data()!;
     final rawTime = data['scheduled_time'] ?? data['time'];
     if (rawTime == null) return null;
     if (rawTime is Timestamp) return rawTime.toDate().toLocal();
@@ -105,8 +115,6 @@ class FirestoreService {
         .delete();
   }
 
-  // ✅ NEW: Snooze a missed reminder by updating scheduled_time in Firestore.
-  // The Firestore stream will pick it up and re-schedule the notification.
   Future<void> snoozeReminder(String id, {int snoozeMinutes = 10}) async {
     final newTime = DateTime.now().toUtc().add(Duration(minutes: snoozeMinutes));
     await _db
@@ -134,27 +142,213 @@ class ReminderPage extends StatefulWidget {
   State<ReminderPage> createState() => _ReminderPageState();
 }
 
-class _ReminderPageState extends State<ReminderPage> {
+class _ReminderPageState extends State<ReminderPage>
+    with WidgetsBindingObserver {
   final firestore = FirestoreService();
+
+  // ── Scheduling state ──────────────────────────────────────────────────────
+
+  /// docId → last DateTime we scheduled a notification for.
+  /// KEY FIX: We only reschedule if scheduled_time actually changed.
+  /// This prevents Firestore stream churn (completed/missed/last_modified
+  /// updates) from cancelling and re-creating alarms near their trigger time.
+  final Map<String, DateTime> _lastScheduledTimes = {};
+
+  /// docIds that currently have a live alarm scheduled.
   final Set<String> _scheduledIds = {};
 
-  // ✅ NEW: Track IDs for which we've already shown a missed-reminder banner
-  // this session to avoid spamming the user.
+  /// IDs for which we've shown a missed-reminder banner this session.
   final Set<String> _missedBannerShown = {};
 
-  int _notificationIdFromDocId(String docId) {
-    return docId.hashCode.abs() % 2147483647;
+  StreamSubscription<QuerySnapshot>? _reminderSub;
+
+  // ── Notification ID ───────────────────────────────────────────────────────
+
+  int _notificationIdFromDocId(String docId) =>
+      docId.hashCode.abs() % 2147483647;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SMART NOTIFICATION TYPE
+  // Detects the reminder category from the task title so the right vibration
+  // pattern and icon is used automatically.
+  // ─────────────────────────────────────────────────────────────────────────
+  NotificationAlertType _typeFromTitle(String title) {
+    final t = title.toLowerCase();
+    if (t.contains('medicine') ||
+        t.contains('tablet') ||
+        t.contains('pill') ||
+        t.contains('dose') ||
+        t.contains('insulin') ||
+        t.contains('injection') ||
+        t.contains('syrup')) {
+      return NotificationAlertType.medicine;
+    }
+    if (t.contains('water') ||
+        t.contains('drink') ||
+        t.contains('hydrat')) {
+      return NotificationAlertType.water;
+    }
+    if (t.contains('walk') ||
+        t.contains('exercise') ||
+        t.contains('yoga') ||
+        t.contains('gym') ||
+        t.contains('physio')) {
+      return NotificationAlertType.exercise;
+    }
+    if (t.contains('doctor') ||
+        t.contains('appointment') ||
+        t.contains('clinic') ||
+        t.contains('hospital') ||
+        t.contains('checkup') ||
+        t.contains('bp check')) {
+      return NotificationAlertType.appointment;
+    }
+    return NotificationAlertType.task;
   }
 
-  StreamSubscription<QuerySnapshot>? _reminderSub;
+  // ─────────────────────────────────────────────────────────────────────────
+  // SCHEDULE ONE REMINDER
+  // Central helper — all scheduling goes through here so the guard logic
+  // (_lastScheduledTimes) is always applied.
+  // ─────────────────────────────────────────────────────────────────────────
+  Future<void> _scheduleIfNeeded({
+    required String docId,
+    required String title,
+    required DateTime scheduledTime,
+    required String userName,
+    bool force = false, // set true for boot-recovery to always restore alarms
+  }) async {
+    // ── 1. Skip if already in the past (>1 min ago) ──────────────────────
+    if (scheduledTime
+        .isBefore(DateTime.now().subtract(const Duration(minutes: 1)))) {
+      debugPrint(
+          '⏭️ _scheduleIfNeeded: $docId is past — skipping');
+      return;
+    }
+
+    // ── 2. KEY FIX: Skip if time hasn't changed ───────────────────────────
+    // Firestore emits "modified" events for completed, missed, last_modified,
+    // recurring_type, etc. — none of which require a new alarm. We only
+    // reschedule when scheduled_time itself changed (snooze, backend advance).
+    if (!force) {
+      final prev = _lastScheduledTimes[docId];
+      if (prev != null &&
+          prev.difference(scheduledTime).abs() < const Duration(seconds: 5)) {
+        debugPrint('⏭️ _scheduleIfNeeded: $docId time unchanged — skipping');
+        return;
+      }
+    }
+
+    final notifId = _notificationIdFromDocId(docId);
+    final type    = _typeFromTitle(title);
+
+    await NotificationService.scheduleReminder(
+      id:            notifId,
+      title:         title,
+      scheduledTime: scheduledTime,
+      userName:      userName,
+      type:          type,
+    );
+
+    _scheduledIds.add(docId);
+    _lastScheduledTimes[docId] = scheduledTime;
+    debugPrint('🔔 Scheduled: "$title" at $scheduledTime ($docId)');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BOOT RECOVERY
+  // Called once at init. Fetches ALL pending reminders from Firestore and
+  // restores any alarms that were killed when the app/OS restarted.
+  //
+  // WHY: flutter_local_notifications alarms are wiped on device restart and
+  // on OEM forced-kills (Xiaomi MIUI, Samsung One UI, etc.). The Firestore
+  // stream only delivers "added" events for NEW docs — it won't re-fire for
+  // existing reminders on startup. Boot recovery fills that gap.
+  // ─────────────────────────────────────────────────────────────────────────
+  Future<void> _bootRecovery(String userName) async {
+    debugPrint('🔄 Boot recovery: checking pending reminders…');
+    try {
+      final docs = await firestore.getPendingReminders();
+      int recovered = 0;
+
+      for (final doc in docs) {
+        final data    = doc.data() as Map<String, dynamic>;
+        final docId   = doc.id;
+        final rawTime = data['scheduled_time'] ?? data['time'];
+        if (rawTime == null) continue;
+
+        DateTime scheduledTime;
+        if (rawTime is Timestamp) {
+          scheduledTime = rawTime.toDate().toLocal();
+        } else if (rawTime is String) {
+          final parsed = DateTime.tryParse(rawTime);
+          if (parsed == null) continue;
+          scheduledTime = parsed.isUtc ? parsed.toLocal() : parsed;
+        } else {
+          continue;
+        }
+
+        final title = data['task'] ?? data['title'] ?? 'Reminder';
+        await _scheduleIfNeeded(
+          docId:         docId,
+          title:         title,
+          scheduledTime: scheduledTime,
+          userName:      userName,
+          force:         true, // always restore on boot regardless of cache
+        );
+        recovered++;
+      }
+
+      debugPrint('✅ Boot recovery: restored $recovered reminder(s)');
+    } catch (e) {
+      debugPrint('❌ Boot recovery failed: $e');
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // LIFECYCLE
+  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
-    _reminderSub = firestore.getReminders().listen((snapshot) async {
+    // Boot recovery first, then start the live stream.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       final userName = SettingsProvider.of(context).username;
+      await _bootRecovery(userName);
+      _startReminderStream(userName);
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _reminderSub?.cancel();
+    super.dispose();
+  }
+
+  /// Resume recovery — OEM ROM may have killed alarms while app was backgrounded.
+  /// When user brings app to foreground, re-check and restore any missing alarms.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      debugPrint('📱 App resumed — running recovery check');
+      final userName = SettingsProvider.of(context).username;
+      // force=false here: only reschedules if time changed or not yet scheduled.
+      // This is lighter than boot recovery (no force flag) to avoid churn.
+      _bootRecovery(userName);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // FIRESTORE STREAM
+  // ─────────────────────────────────────────────────────────────────────────
+  void _startReminderStream(String userName) {
+    _reminderSub = firestore.getReminders().listen((snapshot) async {
+      if (!mounted) return;
 
       for (final change in snapshot.docChanges) {
         final docId = change.doc.id;
@@ -162,52 +356,57 @@ class _ReminderPageState extends State<ReminderPage> {
 
         debugPrint('STREAM EVENT: ${change.type} $docId');
 
+        // ── REMOVED ─────────────────────────────────────────────────────────
         if (change.type == DocumentChangeType.removed) {
           await NotificationService.markDone(_notificationIdFromDocId(docId));
           _scheduledIds.remove(docId);
+          _lastScheduledTimes.remove(docId);
           _missedBannerShown.remove(docId);
           continue;
         }
 
+        // ── MODIFIED ────────────────────────────────────────────────────────
         if (change.type == DocumentChangeType.modified) {
           final isCompleted = data['completed'] == true;
           final isMissed    = data['missed']    == true;
 
+          // Cancel alarm when completed.
           if (isCompleted) {
             await NotificationService.markDone(_notificationIdFromDocId(docId));
             _scheduledIds.remove(docId);
+            _lastScheduledTimes.remove(docId);
+            continue; // no further processing needed
           }
 
-          // ✅ NEW: Show snooze banner when a reminder is marked missed
+          // Show missed-reminder banner once per session.
           if (isMissed && !_missedBannerShown.contains(docId) && mounted) {
             _missedBannerShown.add(docId);
             final taskName = data['task'] ?? data['title'] ?? 'your reminder';
             _showMissedReminderBanner(docId, taskName);
           }
 
-          // ✅ NEW: Re-schedule notification after snooze (scheduled_time changed)
-          if (!isCompleted && !isMissed && _scheduledIds.contains(docId)) {
+          // KEY FIX: Only reschedule when scheduled_time changed.
+          // _scheduleIfNeeded() compares against _lastScheduledTimes internally.
+          // This means harmless backend writes (missed flag, last_modified, etc.)
+          // are ignored — alarms are NOT cancelled and re-created unnecessarily.
+          if (!isCompleted && !isMissed) {
             final rawTime = data['scheduled_time'] ?? data['time'];
             if (rawTime is Timestamp) {
               final newTime = rawTime.toDate().toLocal();
-              if (newTime.isAfter(DateTime.now())) {
-                final title = data['task'] ?? data['title'] ?? 'Reminder';
-                await NotificationService.scheduleReminder(
-                  id:            _notificationIdFromDocId(docId),
-                  title:         title,
-                  scheduledTime: newTime,
-                  userName:      userName,
-                  type:          NotificationAlertType.task,
-                );
-                debugPrint('🔔 Re-scheduled (snooze): $title at $newTime');
-              }
+              final title   = data['task'] ?? data['title'] ?? 'Reminder';
+              await _scheduleIfNeeded(
+                docId:         docId,
+                title:         title,
+                scheduledTime: newTime,
+                userName:      userName,
+              );
             }
           }
           continue;
         }
 
+        // ── ADDED ────────────────────────────────────────────────────────────
         if (change.type != DocumentChangeType.added) continue;
-        if (_scheduledIds.contains(docId)) continue;
         if (data['completed'] == true) continue;
 
         final rawTime = data['scheduled_time'] ?? data['time'];
@@ -227,34 +426,20 @@ class _ReminderPageState extends State<ReminderPage> {
           continue;
         }
 
-        if (scheduledTime
-            .isBefore(DateTime.now().subtract(const Duration(minutes: 1)))) {
-          debugPrint('⚠️ Reminder $docId is in the past — skipping notification');
-          continue;
-        }
-
-        _scheduledIds.add(docId);
         final title = data['task'] ?? data['title'] ?? 'Reminder';
-        await NotificationService.scheduleReminder(
-          id:            _notificationIdFromDocId(docId),
+        await _scheduleIfNeeded(
+          docId:         docId,
           title:         title,
           scheduledTime: scheduledTime,
           userName:      userName,
-          type:          NotificationAlertType.task,
         );
-
-        debugPrint('🔔 Scheduled reminder: $title at $scheduledTime ($docId)');
       }
     });
   }
 
-  @override
-  void dispose() {
-    _reminderSub?.cancel();
-    super.dispose();
-  }
-
-  // ✅ NEW: Show a SnackBar with a snooze action when a reminder is missed
+  // ─────────────────────────────────────────────────────────────────────────
+  // MISSED REMINDER BANNER
+  // ─────────────────────────────────────────────────────────────────────────
   void _showMissedReminderBanner(String reminderId, String taskName) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -296,13 +481,13 @@ class _ReminderPageState extends State<ReminderPage> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // ✅ UPDATED: ADD REMINDER DIALOG — now includes recurring type picker
+  // ADD REMINDER DIALOG
   // ─────────────────────────────────────────────────────────────────────────
   Future<void> _showAddReminderDialog() async {
     final titleController = TextEditingController();
-    DateTime?   pickedDate;
-    TimeOfDay?  pickedTime;
-    String      recurringType = 'none'; // ✅ default
+    DateTime?  pickedDate;
+    TimeOfDay? pickedTime;
+    String     recurringType = 'none';
 
     await showDialog(
       context: context,
@@ -340,7 +525,6 @@ class _ReminderPageState extends State<ReminderPage> {
                     const SizedBox(height: 16),
 
                     // ── Quick category chips ─────────────────────────────
-                    // These pre-fill the text field with common tasks.
                     const Text(
                       'Quick Add',
                       style: TextStyle(
@@ -378,7 +562,7 @@ class _ReminderPageState extends State<ReminderPage> {
                       ),
                       onTap: () async {
                         final d = await showDatePicker(
-                          context: context,
+                          context:     context,
                           initialDate: DateTime.now(),
                           firstDate:   DateTime.now(),
                           lastDate:    DateTime.now().add(const Duration(days: 365)),
@@ -407,7 +591,7 @@ class _ReminderPageState extends State<ReminderPage> {
                     ),
                     const SizedBox(height: 8),
 
-                    // ✅ NEW: Recurring type quick-select chips
+                    // ── Recurring type chips ─────────────────────────────
                     const Text(
                       'Repeat',
                       style: TextStyle(
@@ -428,7 +612,6 @@ class _ReminderPageState extends State<ReminderPage> {
                       ],
                     ),
 
-                    // ✅ Show helpful hint when recurring is selected
                     if (recurringType != 'none') ...[
                       const SizedBox(height: 8),
                       Container(
@@ -498,7 +681,7 @@ class _ReminderPageState extends State<ReminderPage> {
                     await firestore.addReminder(
                       title,
                       scheduledTime,
-                      recurringType: recurringType, // ✅ pass to Firestore
+                      recurringType: recurringType,
                     );
 
                     if (context.mounted) {
@@ -526,21 +709,20 @@ class _ReminderPageState extends State<ReminderPage> {
     );
   }
 
-  // ✅ Helper: Quick-fill chip for task name
+  // ── Quick-fill chip ─────────────────────────────────────────────────────
   Widget _quickChip(String label, TextEditingController controller,
       void Function(void Function()) setDialogState) {
     return ActionChip(
       label: Text(label, style: const TextStyle(fontSize: 12)),
       backgroundColor: const Color(0xFFE8F5E9),
       onPressed: () => setDialogState(() {
-        // Strip emoji prefix for the task text
         final text = label.replaceAll(RegExp(r'^\S+\s'), '').trim();
         controller.text = text;
       }),
     );
   }
 
-  // ✅ Helper: Recurring type selection chip
+  // ── Recurring chip ──────────────────────────────────────────────────────
   Widget _recurringChip(
     String label,
     String value,
@@ -587,10 +769,11 @@ class _ReminderPageState extends State<ReminderPage> {
     await firestore.deleteReminder(reminder.id);
     await NotificationService.markDone(_notificationIdFromDocId(reminder.id));
     _scheduledIds.remove(reminder.id);
+    _lastScheduledTimes.remove(reminder.id);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // ✅ UPDATED: REMINDER CARD — shows recurring badge
+  // REMINDER CARD
   // ─────────────────────────────────────────────────────────────────────────
   Widget _buildReminderCard(Reminder reminder) {
     final settings  = SettingsProvider.of(context);
@@ -601,7 +784,6 @@ class _ReminderPageState extends State<ReminderPage> {
     final timeLabel = DateFormat('hh:mm a').format(reminder.time);
     final fullLabel = '$dayLabel • $timeLabel';
 
-    // ✅ Recurring badge label
     final recurringBadge = {
       'daily':   '🔁 Daily',
       'weekly':  '📅 Weekly',
@@ -616,7 +798,7 @@ class _ReminderPageState extends State<ReminderPage> {
     } else if (isOverdue) {
       cardIcon = Icons.warning_amber_rounded;
     } else if (reminder.recurringType != 'none') {
-      cardIcon = Icons.repeat_rounded;           // ✅ recurring icon
+      cardIcon = Icons.repeat_rounded;
     } else {
       cardIcon = Icons.notifications_active_outlined;
     }
@@ -629,7 +811,7 @@ class _ReminderPageState extends State<ReminderPage> {
     } else if (isOverdue) {
       iconColor = Colors.red;
     } else if (reminder.recurringType != 'none') {
-      iconColor = const Color(0xFF1976D2);      // blue for recurring
+      iconColor = const Color(0xFF1976D2);
     } else {
       iconColor = const Color(0xFF2D6A4F);
     }
@@ -662,7 +844,7 @@ class _ReminderPageState extends State<ReminderPage> {
 
             const SizedBox(width: 14),
 
-            // Title + date/time + recurring badge
+            // Title + date/time + badges
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -681,8 +863,6 @@ class _ReminderPageState extends State<ReminderPage> {
                     ),
                   ),
                   const SizedBox(height: 5),
-
-                  // Time row
                   Row(
                     children: [
                       Icon(
@@ -714,7 +894,7 @@ class _ReminderPageState extends State<ReminderPage> {
                     ],
                   ),
 
-                  // ✅ Badges row
+                  // Badges
                   if (isOverdue || reminder.isMissed || recurringBadge != null) ...[
                     const SizedBox(height: 4),
                     Wrap(
@@ -755,25 +935,29 @@ class _ReminderPageState extends State<ReminderPage> {
                     if (completing) {
                       await NotificationService.markDone(notifId);
                       _scheduledIds.remove(reminder.id);
+                      _lastScheduledTimes.remove(reminder.id);
                     } else {
+                      // Un-completing: restore alarm if time is still future
                       final scheduledTime =
                           await firestore.getReminderTime(reminder.id);
                       if (scheduledTime != null &&
                           scheduledTime.isAfter(DateTime.now())) {
-                        final userName = SettingsProvider.of(context).username;
-                        await NotificationService.scheduleReminder(
-                          id:            notifId,
+                        final userName =
+                            SettingsProvider.of(context).username;
+                        // Clear cache so _scheduleIfNeeded doesn't skip it
+                        _lastScheduledTimes.remove(reminder.id);
+                        await _scheduleIfNeeded(
+                          docId:         reminder.id,
                           title:         reminder.title,
                           scheduledTime: scheduledTime,
                           userName:      userName,
-                          type:          NotificationAlertType.task,
                         );
                       }
                     }
                   },
                 ),
 
-                // ✅ Snooze button for missed reminders
+                // Snooze button for missed reminders
                 if (reminder.isMissed)
                   IconButton(
                     icon: const Icon(Icons.snooze_rounded,
@@ -807,7 +991,6 @@ class _ReminderPageState extends State<ReminderPage> {
     ).animate().fadeIn(duration: 300.ms).slideX(begin: 0.2, duration: 300.ms);
   }
 
-  // ✅ Helper: small badge pill
   Widget _badge(String label, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -839,23 +1022,6 @@ class _ReminderPageState extends State<ReminderPage> {
         backgroundColor: const Color(0xFF2D6A4F),
         iconTheme: const IconThemeData(color: Colors.white),
         elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.bug_report_outlined),
-            tooltip: 'Debug pending notifications',
-            onPressed: () async {
-              await NotificationService.debugPendingNotifications();
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                        'Check debug console for pending notifications'),
-                  ),
-                );
-              }
-            },
-          ),
-        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showAddReminderDialog,
@@ -871,8 +1037,7 @@ class _ReminderPageState extends State<ReminderPage> {
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return const Center(
-              child:
-                  CircularProgressIndicator(color: Color(0xFF2D6A4F)),
+              child: CircularProgressIndicator(color: Color(0xFF2D6A4F)),
             );
           }
 
@@ -896,11 +1061,9 @@ class _ReminderPageState extends State<ReminderPage> {
               parsedTime = rawTime.toDate().toLocal();
             } else if (rawTime is String) {
               final parsed = DateTime.tryParse(rawTime);
-              if (parsed != null) {
-                parsedTime = parsed.isUtc ? parsed.toLocal() : parsed;
-              } else {
-                parsedTime = DateTime.now();
-              }
+              parsedTime   = parsed != null
+                  ? (parsed.isUtc ? parsed.toLocal() : parsed)
+                  : DateTime.now();
             } else {
               parsedTime = DateTime.now();
             }
@@ -910,8 +1073,8 @@ class _ReminderPageState extends State<ReminderPage> {
               title:         data['task'] ?? data['title'] ?? 'No Title',
               time:          parsedTime,
               isCompleted:   data['completed'] ?? false,
-              recurringType: data['recurring_type'] ?? 'none', // ✅ NEW
-              isMissed:      data['missed']    ?? false,         // ✅ NEW
+              recurringType: data['recurring_type'] ?? 'none',
+              isMissed:      data['missed']    ?? false,
             );
           }).toList();
 
